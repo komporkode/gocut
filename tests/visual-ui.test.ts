@@ -55,4 +55,24 @@ describe("optional tools defaults", () => {
       invert: false,
     });
   });
+  it("enforces desktop hygiene with user-select none globally and text select on inputs", async () => {
+    const fs = await import("fs");
+    const css = fs.readFileSync("src/styles.css", "utf-8");
+    expect(css).toContain("user-select: none");
+    expect(css).toContain("user-select: text");
+  });
+  it("removes green background pixels with chroma key", async () => {
+    const { applyChromaKey } = await import("../src/core/visual");
+    const pixels = new Uint8ClampedArray([0, 255, 0, 255, 255, 0, 0, 255]);
+    applyChromaKey(pixels, { enabled: true, color: "#00ff00", similarity: 0.1, blend: 0 });
+    expect(pixels[3]).toBe(0);
+    expect(pixels[7]).toBe(255);
+  });
+  it("applies shape mask to clip pixels", async () => {
+    const { applyShapeMask } = await import("../src/core/visual");
+    const pixels = new Uint8ClampedArray(2 * 2 * 4).fill(255);
+    applyShapeMask(pixels, 2, 2, { shape: "rectangle", width: 0.1, height: 0.1, feather: 0, invert: false });
+    expect(pixels[3]).toBe(0);
+  });
 });
+

@@ -1,11 +1,7 @@
-# ReaCut
+# GoCut
 
 [English](README.md) / [简体中文](README.zh-CN.md)
 
-The English README is now the default: [read the full README](README.md).
+The English README is the primary documentation: [read the full README](README.md).
 
-This file keeps existing links to `README.en.md` working.
-
-[Download for macOS — v0.6.0 Apple Silicon](https://github.com/Xiangyu-CAS/rea-capcut/releases/download/v0.6.0/ReaCut-0.6.0-arm64.dmg) · [All releases](https://github.com/Xiangyu-CAS/rea-capcut/releases)
-
-Preview, ad-hoc signed and not notarized. See the main README for installation and optional local speech dependencies.
+GoCut is a fast, ultra-lightweight, offline desktop video editor powered by Go, Wails v2, and React. (Forked and modernized from ReaCut).

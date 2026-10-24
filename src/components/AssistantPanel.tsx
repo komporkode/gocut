@@ -1,3 +1,4 @@
+import { useTranslation } from "../i18n";
 import { useEffect, useRef, useState } from "react";
 import { MessageSquare, RefreshCw, Send, Square, X } from "lucide-react";
 import { useEditorStore } from "../editor/store";
@@ -8,6 +9,7 @@ import "./AssistantPanel.css";
 
 type Proposal = { preview: AssistantEditPreview; base: string; applied: boolean };
 export default function AssistantPanel({ onClose }: { onClose(): void }) {
+  const { t } = useTranslation();
   const project = useEditorStore(s => s.project);
   const [provider, setProvider] = useState<AssistantProvider>("codex");
   const [providers, setProviders] = useState<AssistantProviderInfo[]>([]);
@@ -72,26 +74,26 @@ export default function AssistantPanel({ onClose }: { onClose(): void }) {
   };
   const currentProvider = providers.find(p => p.id === provider);
   const stale = proposal && JSON.stringify(project) !== proposal.base;
-  return <aside className="assistant-panel panel" aria-label="剪辑助手">
-    <header><strong><MessageSquare size={16} />剪辑助手</strong><button aria-label="关闭剪辑助手" onClick={onClose}><X size={16} /></button></header>
+  return <aside className="assistant-panel panel" aria-label={t("assistant.title")}>
+    <header><strong><MessageSquare size={16} />{t("assistant.title")}</strong><button aria-label={t("about.close")} onClick={onClose}><X size={16} /></button></header>
     <div className="assistant-config">
       <select aria-label="助手后端" value={provider} disabled={busy} onChange={e => setProvider(e.target.value as AssistantProvider)}><option value="codex">Codex CLI</option><option value="claude">Claude Code</option></select>
       <button aria-label="刷新助手状态" disabled={busy} onClick={() => void refresh()}><RefreshCw size={14} /></button>
-      <button disabled={busy || !window.editorAPI} onClick={() => void window.editorAPI!.chooseAssistantCLI(provider).then(setProviders).catch(e => setError(String(e)))}>选择 CLI</button>
+      <button disabled={busy || !window.editorAPI} onClick={() => void window.editorAPI!.chooseAssistantCLI(provider).then(setProviders).catch(e => setError(String(e)))}>{t("assistant.chooseCLI")}</button>
     </div>
-    <p className="assistant-provider-status">{currentProvider?.available ? `已检测到 ${currentProvider.label} ${currentProvider.version ?? ""}` : currentProvider?.error ?? "正在检测本机 CLI…"}</p>
+    <p className="assistant-provider-status">{currentProvider?.available ? `${t("assistant.detected")} ${currentProvider.label} ${currentProvider.version ?? ""}` : currentProvider?.error ?? t("assistant.detecting")}</p>
     <div className="assistant-chat" aria-live="polite">
-      {!messages.length && <div className="assistant-welcome"><MessageSquare size={28} /><h3>把剪辑想法说出来</h3><p>根据当前时间线提出修改，检查后由你应用。支持文字、裁剪、分割、变速、音量和画面调整。</p><button onClick={() => setPrompt("在播放头添加持续3秒的标题：故事由此开始")}>添加片头标题</button><button onClick={() => setPrompt("分析当前时间线，给我3条剪辑建议，暂时不要修改")}>看看可以怎样改进</button></div>}
-      {messages.map((message, i) => <div key={i} className={`assistant-message ${message.role}`}><small>{message.role === "user" ? "你" : "助手"}</small><p>{message.content}</p></div>)}
-      {stream && <div className="assistant-message assistant"><small>助手</small><p>{stream}</p></div>}
+      {!messages.length && <div className="assistant-welcome"><MessageSquare size={28} /><h3>{t("assistant.welcomeTitle")}</h3><p>{t("assistant.welcomeDesc")}</p><button onClick={() => setPrompt("Add a 3-second opening title: The Adventure Begins")}>{t("assistant.sampleTitle")}</button><button onClick={() => setPrompt("Analyze current timeline and give me 3 editing suggestions")}>{t("assistant.sampleAdvice")}</button></div>}
+      {messages.map((message, i) => <div key={i} className={`assistant-message ${message.role}`}><small>{message.role === "user" ? t("assistant.roleUser") : t("assistant.roleAssistant")}</small><p>{message.content}</p></div>)}
+      {stream && <div className="assistant-message assistant"><small>{t("assistant.roleAssistant")}</small><p>{stream}</p></div>}
       {status && <p className="assistant-status">{status}</p>}
       {error && <p className="assistant-error" role="alert">{error}</p>}
-      {proposal && <div className="assistant-proposal"><strong>待检查的修改 · {proposal.preview.descriptions.length} 项</strong><ol>{proposal.preview.descriptions.map((item, i) => <li key={i}>{item}</li>)}</ol><p>{proposal.preview.before.clips} → {proposal.preview.after.clips} 个片段 · {proposal.preview.after.duration.toFixed(2)} 秒</p><button className="primary" disabled={proposal.applied || !!stale} onClick={() => {
-        if (JSON.stringify(useEditorStore.getState().project) !== proposal.base) { setError("项目已变化，请重新生成建议"); return; }
+      {proposal && <div className="assistant-proposal"><strong>{t("assistant.proposalTitle")} · {proposal.preview.descriptions.length}</strong><ol>{proposal.preview.descriptions.map((item, i) => <li key={i}>{item}</li>)}</ol><p>{proposal.preview.before.clips} → {proposal.preview.after.clips} clips · {proposal.preview.after.duration.toFixed(2)} s</p><button className="primary" disabled={proposal.applied || !!stale} onClick={() => {
+        if (JSON.stringify(useEditorStore.getState().project) !== proposal.base) { setError(t("assistant.stale")); return; }
         useEditorStore.getState().commit(proposal.preview.project); setProposal({ ...proposal, applied: true });
-      }}>{proposal.applied ? "已应用 · 可撤销" : stale ? "项目已变化，请重新生成" : `应用 ${proposal.preview.descriptions.length} 项修改`}</button></div>}
+      }}>{proposal.applied ? t("assistant.applied") : stale ? t("assistant.stale") : `${t("effects.apply")} (${proposal.preview.descriptions.length})`}</button></div>}
       <div ref={chatEnd} />
     </div>
-    <div className="assistant-compose"><p>发送会将问题、对话与时间线摘要交给所选 CLI 服务；不发送媒体文件。请先在终端登录 CLI。</p><textarea aria-label="助手消息" placeholder="例如：把选中片段音量降低一半" maxLength={8000} value={prompt} onChange={e => setPrompt(e.target.value)} onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); if (!busy && loaded && currentProvider?.available) void send(); } }} /><div><button disabled={busy || !messages.length} onClick={() => { persist([], project.id); setProposal(null); setError(""); }}>清空对话</button>{!busy && lastPrompt.current && <button onClick={() => void send(lastPrompt.current)} disabled={!currentProvider?.available}>重试</button>}{busy ? <button onClick={() => { const req = active.current; if (req) void window.editorAPI?.cancelAssistant(req.id).catch(e => setError(String(e))); }}><Square size={13} />取消</button> : <button className="primary" disabled={!loaded || !prompt.trim() || !currentProvider?.available} onClick={() => void send()}><Send size={13} />发送</button>}</div></div>
+    <div className="assistant-compose"><p>{t("assistant.disclaimer")}</p><textarea aria-label={t("assistant.title")} placeholder={t("assistant.placeholder")} maxLength={8000} value={prompt} onChange={e => setPrompt(e.target.value)} onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); if (!busy && loaded && currentProvider?.available) void send(); } }} /><div><button disabled={busy || !messages.length} onClick={() => { persist([], project.id); setProposal(null); setError(""); }}>{t("assistant.clear")}</button>{!busy && lastPrompt.current && <button onClick={() => void send(lastPrompt.current)} disabled={!currentProvider?.available}>Retry</button>}{busy ? <button onClick={() => { const req = active.current; if (req) void window.editorAPI?.cancelAssistant(req.id).catch(e => setError(String(e))); }}><Square size={13} />Cancel</button> : <button className="primary" disabled={!loaded || !prompt.trim() || !currentProvider?.available} onClick={() => void send()}><Send size={13} />{t("assistant.send")}</button>}</div></div>
   </aside>;
 }

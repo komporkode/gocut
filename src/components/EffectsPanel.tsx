@@ -14,6 +14,7 @@ import "./EffectsPanel.css";
 import { MotionLibrary } from "./CreativeLibrary";
 import { motionPatch } from "../core/creativePresets";
 import PresetPreview from "./PresetPreview";
+import { useTranslation, type TranslationKey } from "../i18n";
 
 export interface EffectsPanelProps {
   clip?: Clip;
@@ -32,15 +33,15 @@ export interface ColorPreset {
 export const COLOR_PRESETS: ColorPreset[] = [
   {
     id: "original",
-    name: "原色",
-    description: "还原素材的自然色彩",
+    name: "Original",
+    description: "Natural colors without color grading",
     colors: "#526658,#baac84,#65828d",
     adjustments: { ...DEFAULT_ADJUSTMENTS },
   },
   {
     id: "cinema",
-    name: "电影",
-    description: "深邃对比，低饱和氛围",
+    name: "Cinematic",
+    description: "Deep contrast with subtle moody saturation",
     colors: "#243744,#b49868,#406d7a",
     adjustments: {
       brightness: -0.04,
@@ -52,8 +53,8 @@ export const COLOR_PRESETS: ColorPreset[] = [
   },
   {
     id: "warm",
-    name: "暖阳",
-    description: "温暖明亮，适合日常记录",
+    name: "Warm Sunlight",
+    description: "Warm and bright, perfect for daily vlogs",
     colors: "#927b51,#ead092,#c4a570",
     adjustments: {
       brightness: 0.05,
@@ -65,8 +66,8 @@ export const COLOR_PRESETS: ColorPreset[] = [
   },
   {
     id: "cool",
-    name: "冷蓝",
-    description: "清透冷调，凸显画面层次",
+    name: "Cool Blue",
+    description: "Crisp and cool tones, highlighting depth",
     colors: "#2c5367,#86acbc,#55788e",
     adjustments: {
       brightness: 0.015,
@@ -78,8 +79,8 @@ export const COLOR_PRESETS: ColorPreset[] = [
   },
   {
     id: "mono",
-    name: "黑白",
-    description: "纯粹黑白，保留光影细节",
+    name: "Monochrome",
+    description: "Timeless black and white with rich highlights",
     colors: "#343839,#bebdb4,#6d7270",
     adjustments: {
       brightness: 0,
@@ -91,8 +92,8 @@ export const COLOR_PRESETS: ColorPreset[] = [
   },
   {
     id: "vintage",
-    name: "复古",
-    description: "褪色暖调的胶片印象",
+    name: "Vintage Film",
+    description: "Warm faded tones reminiscent of classic analog film",
     colors: "#686a4c,#c5b680,#8c987d",
     adjustments: {
       brightness: 0.045,
@@ -104,8 +105,8 @@ export const COLOR_PRESETS: ColorPreset[] = [
   },
   {
     id: "vivid",
-    name: "鲜明",
-    description: "鲜亮饱和，呈现丰富色彩",
+    name: "Vivid",
+    description: "High vibrancy and rich color saturation",
     colors: "#45836b,#f6cf72,#679baa",
     adjustments: {
       brightness: 0.02,
@@ -117,8 +118,8 @@ export const COLOR_PRESETS: ColorPreset[] = [
   },
   {
     id: "soft",
-    name: "柔焦",
-    description: "柔和细节，营造朦胧质感",
+    name: "Soft Focus",
+    description: "Gently softened details creating a dreamy glow",
     colors: "#8d9d9b,#d6c9af,#a4aeb9",
     adjustments: {
       brightness: 0.03,
@@ -171,23 +172,32 @@ export default function EffectsPanel({
         0.001,
     ),
   );
+  const { t } = useTranslation();
+  const getPresetName = (p: ColorPreset) => {
+    const key = (`effects.preset.${p.id}.name`) as TranslationKey;
+    return t(key) || p.name;
+  };
+  const getPresetDesc = (p: ColorPreset) => {
+    const key = (`effects.preset.${p.id}.desc`) as TranslationKey;
+    return t(key) || p.description;
+  };
   const disabled = !clip || locked;
   const colorDisabled = disabled || kind === "audio" || kind === "text";
   return (
-    <section className="effects-panel" aria-label="本地效果库">
+    <section className="effects-panel" aria-label={t("effects.library")}>
       <div className="effects-title">
         <Sparkles size={15} />
-        <strong>效果预设 · 16</strong>
-        <span>本地处理</span>
+        <strong>{t("effects.title")}</strong>
+        <span>{t("effects.localProcessing")}</span>
       </div>
-      <div className="effects-tabs" role="tablist" aria-label="效果类型">
+      <div className="effects-tabs" role="tablist" aria-label={t("effects.type")}>
         <button
           role="tab"
           aria-selected={tab === "color"}
           className={tab === "color" ? "is-active" : ""}
           onClick={() => setTab("color")}
         >
-          <SlidersHorizontal size={13} /> 调色预设
+          <SlidersHorizontal size={13} /> {t("effects.colorPresets")}
         </button>
         <button
           role="tab"
@@ -195,7 +205,7 @@ export default function EffectsPanel({
           className={tab === "motion" ? "is-active" : ""}
           onClick={() => setTab("motion")}
         >
-          <Sparkles size={13} /> 动态特效
+          <Sparkles size={13} /> {t("effects.motionEffects")}
         </button>
         <button
           role="tab"
@@ -203,7 +213,7 @@ export default function EffectsPanel({
           className={tab === "fade" ? "is-active" : ""}
           onClick={() => setTab("fade")}
         >
-          <Waves size={13} /> 淡入淡出
+          <Waves size={13} /> {t("effects.fade")}
         </button>
       </div>
       <div className="effects-content">
@@ -211,8 +221,8 @@ export default function EffectsPanel({
           <Film size={14} />
           <span>
             {clip
-              ? `${clip.name}${locked ? " · 轨道已锁定" : ""}`
-              : "先在时间线选择一个片段"}
+              ? `${clip.name}${locked ? ` · ${t("timeline.trackLocked")}` : ""}`
+              : t("effects.selectClipPrompt")}
           </span>
           {clip && <ChevronRight size={12} />}
         </div>
@@ -234,8 +244,8 @@ export default function EffectsPanel({
             </p>
             <label className="creative-search">
               <input
-                aria-label="搜索调色预设"
-                placeholder="搜索调色预设"
+                aria-label={t("effects.searchColor")}
+                placeholder={t("effects.searchColor")}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -251,7 +261,7 @@ export default function EffectsPanel({
                 >
                   <PresetPreview
                     adjustments={preset.adjustments}
-                    label={preset.name}
+                    label={getPresetName(preset)}
                   />
                   <div>
                     <span>
@@ -261,7 +271,7 @@ export default function EffectsPanel({
                     <button
                       disabled={colorDisabled}
                       onClick={() => onApply(presetPatch(preset, clip))}
-                      aria-label={`应用${preset.name}调色`}
+                      aria-label={`${t("effects.apply")} ${getPresetName(preset)}`}
                       aria-pressed={!!clip && active?.id === preset.id}
                     >
                       <Check size={12} />
@@ -277,18 +287,16 @@ export default function EffectsPanel({
                 onApply({ adjustments: { ...DEFAULT_ADJUSTMENTS } })
               }
             >
-              <RotateCcw size={12} /> 重置调色
+              <RotateCcw size={12} /> {t("inspector.reset")}
             </button>
           </>
         ) : (
           <>
-            <p className="effects-help">
-              为片段边缘添加平滑变化。画面和声音可以分别设置。
-            </p>
+            <p className="effects-help">{t("effects.fadeHelp")}</p>
             <label className="effects-duration">
-              <span>变化时长</span>
+              <span>{t("effects.fadeDuration")}</span>
               <input
-                aria-label="淡入淡出时长"
+                aria-label={t("effects.fadeDuration")}
                 type="number"
                 min="0.05"
                 max="10"
@@ -300,7 +308,7 @@ export default function EffectsPanel({
                     setSeconds(Math.max(0.05, Math.min(10, n)));
                 }}
               />
-              <span>秒</span>
+              <span>s</span>
             </label>
             {(["visual", "audio"] as const)
               .filter((channel) =>
@@ -309,11 +317,11 @@ export default function EffectsPanel({
               .map((kind) => (
                 <div className="effects-fade-group" key={kind}>
                   <h3>
-                    {kind === "visual" ? "画面" : "声音"}
+                    {kind === "visual" ? t("inspector.tabVideo") : t("inspector.tabAudio")}
                     <span>
                       {clip
                         ? `${kind === "visual" ? clip.fadeIn.toFixed(2) : clip.audioFadeIn.toFixed(2)}s / ${kind === "visual" ? clip.fadeOut.toFixed(2) : clip.audioFadeOut.toFixed(2)}s`
-                        : "入 / 出"}
+                        : `${t("effects.fadeIn")} / ${t("effects.fadeOut")}`}
                     </span>
                   </h3>
                   <div className="effects-fade-grid">
@@ -350,14 +358,12 @@ export default function EffectsPanel({
                   </button>
                 </div>
               ))}
-            <p className="effects-note">
-              变化时长会按片段长度限制；同时淡入淡出各不超过片段的一半。
-            </p>
+            <p className="effects-note">{t("effects.fadeConstraint")}</p>
           </>
         )}
       </div>
       <div className="effects-footer">
-        <Check size={11} /> 预览与导出使用相同参数
+        <Check size={11} /> {t("effects.paramConsistency")}
       </div>
     </section>
   );

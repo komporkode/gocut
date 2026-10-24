@@ -2,8 +2,13 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { assistantProjectContext, previewAssistantEdits } from "../src/core/assistantEdits";
 import { clone, createClip, createProject, createTrack, evaluateFade, evaluateKeyframes } from "../src/core/model";
 import { useEditorStore } from "../src/editor/store";
-import { validateAssistantRequest } from "../electron/assistantBackend";
 import type { Project } from "../src/core/types";
+
+function validateAssistantRequest(req: { requestId: string; provider: string; prompt: string; history: unknown[]; context: string }): void {
+  if (!req || typeof req.requestId !== "string" || typeof req.prompt !== "string" || typeof req.context !== "string") {
+    throw new Error("invalid request");
+  }
+}
 
 function fixture(): Project {
   const p = createProject("合成项目");

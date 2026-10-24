@@ -5,7 +5,7 @@ const html = (await readFile('plugin/ui/index.html', 'utf8')).replace('/*__SCRIP
 await mkdir('dist', { recursive: true });
 await writeFile('dist/plugin.html', html);
 // Keep discovery available without launching a GUI process.
-const protocolBuild = await build({ entryPoints: ['electron/pluginProtocol.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
+const protocolBuild = await build({ entryPoints: ['plugin/protocol.ts'], bundle: true, platform: 'node', format: 'esm', write: false });
 const protocol = await import(`data:text/javascript;base64,${Buffer.from(protocolBuild.outputFiles[0].text).toString('base64')}`);
 const { version } = JSON.parse(await readFile('plugin/plugin.json', 'utf8'));
 await writeFile('plugin/protocol.json', JSON.stringify({ version, tools: protocol.pluginTools,

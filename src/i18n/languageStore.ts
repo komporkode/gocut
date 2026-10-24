@@ -1,12 +1,13 @@
 import { create } from "zustand";
 
-export type Language = "zh-CN" | "en" | "tr";
+export type Language = "zh-CN" | "en" | "id" | "tr";
 
-export const SUPPORTED_LANGUAGES: readonly Language[] = ["zh-CN", "en", "tr"];
-export const DEFAULT_LANGUAGE: Language = "zh-CN";
+export const SUPPORTED_LANGUAGES: readonly Language[] = ["en", "id", "zh-CN", "tr"];
+export const DEFAULT_LANGUAGE: Language = "en";
 
-// Match the namespaced, versioned pattern used in EditorWorkspace.tsx
-export const STORAGE_KEY = "reacut-ui-language-v1";
+// Namespaced, versioned storage key for GoCut
+export const STORAGE_KEY = "gocut-ui-language-v1";
+export const LEGACY_STORAGE_KEY = "reacut-ui-language-v1";
 
 export function isLanguage(value: unknown): value is Language {
   return (

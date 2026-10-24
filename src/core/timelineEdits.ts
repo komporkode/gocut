@@ -1,5 +1,6 @@
 import type { Clip, Project } from './types';
 import { clone, createClip, createTrack, changeClipSpeed, id, snapToFrame, splitClip, trimClip, validateProject } from './model';
+import { DEFAULT_TRANSFORM, DEFAULT_ADJUSTMENTS } from './defaults';
 
 export type PlacementMode = 'insert' | 'overwrite' | 'overlay';
 const end = (c: Clip) => c.start + c.duration;
@@ -152,3 +153,289 @@ export function slipLinked(p: Project, clipId: string, sourceIn: number): Projec
     (a && a.kind !== 'image' && c.sourceIn + delta + c.duration * c.speed > a.duration + 1e-8); })) return p;
   return { ...p, clips: p.clips.map(c => members.includes(c) ? { ...c, sourceIn: c.sourceIn + delta } : c) };
 }
+
+export function rippleTrim(
+  p: Project,
+  clipId: string,
+  edge: 'start' | 'end',
+  time: number,
+): Project {
+  const clip = p.clips.find(c => c.id === clipId);
+  if (!clip || locked(p, clip)) return p;
+  const t = snapToFrame(time, p.fps);
+  if (t <= clip.start + 1 / p.fps - 1e-8 || t >= end(clip) - 1 / p.fps + 1e-8) {
+    return p;
+  }
+  
+  const targetIds = new Set(linkedIds(p, [clipId]));
+  const targetClips = p.clips.filter(c => targetIds.has(c.id));
+  if (targetClips.some(c => locked(p, c))) return p;
+  
+  const delta = edge === 'start' ? t - clip.start : end(clip) - t;
+  if (delta <= 0) return p;
+
+  const affectedTrackIds = new Set(targetClips.map(c => c.trackId));
+
+  const newClips = p.clips.map(c => {
+    if (targetIds.has(c.id)) {
+      if (edge === 'start') {
+        const trimmed = t - c.start;
+        return {
+          ...c,
+          sourceIn: c.sourceIn + trimmed * c.speed,
+          duration: c.duration - trimmed,
+        };
+      } else {
+        return {
+          ...c,
+          duration: t - c.start,
+        };
+      }
+    }
+    if (
+      affectedTrackIds.has(c.trackId) &&
+      c.start >= (edge === 'start' ? clip.start + clip.duration - 1e-8 : end(clip) - 1e-8)
+    ) {
+      return {
+        ...c,
+        start: Math.max(0, c.start - delta),
+      };
+    }
+    return c;
+  });
+
+  return { ...p, clips: newClips };
+}
+
+export function closeGap(p: Project, trackId: string, atTime: number): Project {
+  const track = p.tracks.find(t => t.id === trackId);
+  if (!track || track.locked) return p;
+  const trackClips = p.clips.filter(c => c.trackId === trackId).sort((a, b) => a.start - b.start);
+  if (!trackClips.length) return p;
+
+  let gapStart = -1;
+  let gapDuration = 0;
+
+  if (trackClips[0].start > 1e-4 && atTime <= trackClips[0].start) {
+    gapStart = 0;
+    gapDuration = trackClips[0].start;
+  } else {
+    for (let i = 0; i < trackClips.length - 1; i++) {
+      const c1 = trackClips[i];
+      const c2 = trackClips[i + 1];
+      const c1End = c1.start + c1.duration;
+      if (c2.start > c1End + 1e-4) {
+        if (atTime >= c1End - 1e-4 && atTime <= c2.start + 1e-4) {
+          gapStart = c1End;
+          gapDuration = c2.start - c1End;
+          break;
+        }
+      }
+    }
+  }
+
+  if (gapDuration <= 0) return p;
+
+  const laterClips = trackClips.filter(c => c.start >= gapStart + gapDuration - 1e-4);
+  const laterIds = new Set(laterClips.map(c => c.id));
+  const allAffectedIds = new Set(linkedIds(p, Array.from(laterIds)));
+
+  return {
+    ...p,
+    clips: p.clips.map(c => {
+      if (allAffectedIds.has(c.id)) {
+        return {
+          ...c,
+          start: Math.max(0, c.start - gapDuration),
+        };
+      }
+      return c;
+    }),
+  };
+}
+
+/**
+ * Ripple snap all clips on a track to eliminate gaps and align the first clip to 00:00.
+ * Preserves linked audio synchronicity.
+ */
+export function rippleSnapTrack(p: Project, trackId: string): Project {
+  const track = p.tracks.find(t => t.id === trackId);
+  if (!track || track.locked) return p;
+
+  const trackClips = p.clips
+    .filter(c => c.trackId === trackId)
+    .sort((a, b) => a.start - b.start);
+  if (!trackClips.length) return p;
+
+  let cursor = 0;
+  const newStarts = new Map<string, number>();
+
+  for (const clip of trackClips) {
+    if (clip.start > cursor + 1e-4) {
+      newStarts.set(clip.id, cursor);
+      cursor = snapToFrame(cursor + clip.duration, p.fps);
+    } else {
+      cursor = Math.max(cursor, snapToFrame(clip.start + clip.duration, p.fps));
+    }
+  }
+
+  if (newStarts.size === 0) return p;
+
+  const linkedDeltas = new Map<string, number>();
+  for (const [clipId, newStart] of newStarts.entries()) {
+    const original = p.clips.find(c => c.id === clipId);
+    if (original && original.linkId) {
+      const delta = newStart - original.start;
+      linkedDeltas.set(original.linkId, delta);
+    }
+  }
+
+  return {
+    ...p,
+    clips: p.clips.map(c => {
+      if (newStarts.has(c.id)) {
+        return { ...c, start: newStarts.get(c.id)! };
+      }
+      if (c.linkId && linkedDeltas.has(c.linkId)) {
+        return { ...c, start: Math.max(0, snapToFrame(c.start + linkedDeltas.get(c.linkId)!, p.fps)) };
+      }
+      return c;
+    }),
+  };
+}
+
+/**
+ * Snap all unlocked tracks in the project to eliminate gaps (magnetic timeline snap).
+ */
+export function rippleSnapAllTracks(p: Project): Project {
+  let project = p;
+  const videoTracks = p.tracks.filter(t => t.kind === "video" && !t.locked);
+  const otherTracks = p.tracks.filter(t => t.kind !== "video" && !t.locked);
+
+  for (const track of videoTracks) {
+    project = rippleSnapTrack(project, track.id);
+  }
+  for (const track of otherTracks) {
+    project = rippleSnapTrack(project, track.id);
+  }
+  return project;
+}
+
+export function setClipSpeed(
+  p: Project,
+  clipId: string,
+  speed: number,
+  ripple = false,
+): Project {
+  const clip = p.clips.find(c => c.id === clipId);
+  if (!clip || locked(p, clip) || !Number.isFinite(speed) || speed < 0.1 || speed > 8) {
+    return p;
+  }
+  const oldDuration = clip.duration;
+  const nextProject = speedLinked(p, clipId, speed);
+  const updatedClip = nextProject.clips.find(c => c.id === clipId);
+  if (!updatedClip || !ripple) return nextProject;
+
+  const delta = updatedClip.duration - oldDuration;
+  if (Math.abs(delta) < 1e-5) return nextProject;
+
+  const targetIds = new Set(linkedIds(p, [clipId]));
+  const targetClips = p.clips.filter(c => targetIds.has(c.id));
+  const affectedTrackIds = new Set(targetClips.map(c => c.trackId));
+
+  return {
+    ...nextProject,
+    clips: nextProject.clips.map(c => {
+      if (
+        !targetIds.has(c.id) &&
+        affectedTrackIds.has(c.trackId) &&
+        c.start >= clip.start + oldDuration - 1e-4
+      ) {
+        return {
+          ...c,
+          start: Math.max(0, c.start + delta),
+        };
+      }
+      return c;
+    }),
+  };
+}
+
+export function createCompoundClip(project: Project, clipIds: string[]): Project {
+  if (!clipIds || clipIds.length === 0) return project;
+  const targetIds = new Set(clipIds);
+  const selectedClips = project.clips.filter((c) => targetIds.has(c.id));
+  if (selectedClips.length === 0) return project;
+
+  const minStart = Math.min(...selectedClips.map((c) => c.start));
+  const maxEnd = Math.max(...selectedClips.map((c) => c.start + c.duration));
+  const duration = Math.max(0.1, maxEnd - minStart);
+
+  const sortedClips = [...selectedClips].sort((a, b) => a.start - b.start);
+  const targetTrackId = sortedClips[0].trackId;
+
+  const nestedClips: Clip[] = selectedClips.map((c) => ({
+    ...clone(c),
+    start: c.start - minStart,
+  }));
+
+  const compoundClip: Clip = {
+    id: id(),
+    trackId: targetTrackId,
+    name:
+      selectedClips.length === 1
+        ? `${selectedClips[0].name} (Compound)`
+        : "Compound Clip",
+    start: minStart,
+    duration,
+    sourceIn: 0,
+    speed: 1,
+    volume: 1,
+    muted: false,
+    transform: { ...DEFAULT_TRANSFORM },
+    adjustments: { ...DEFAULT_ADJUSTMENTS },
+    keyframes: [],
+    fadeIn: 0,
+    fadeOut: 0,
+    audioFadeIn: 0,
+    audioFadeOut: 0,
+    isCompound: true,
+    nestedClips,
+  };
+
+  const survivingClips = project.clips.filter((c) => !targetIds.has(c.id));
+  survivingClips.push(compoundClip);
+
+  return {
+    ...project,
+    clips: survivingClips,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function ungroupCompoundClip(
+  project: Project,
+  compoundClipId: string,
+): Project {
+  const compoundClip = project.clips.find((c) => c.id === compoundClipId);
+  if (!compoundClip || !compoundClip.isCompound || !compoundClip.nestedClips) {
+    return project;
+  }
+
+  const baseStart = compoundClip.start;
+  const restoredClips: Clip[] = compoundClip.nestedClips.map((nested) => ({
+    ...clone(nested),
+    start: baseStart + nested.start,
+  }));
+
+  const remainingClips = project.clips.filter((c) => c.id !== compoundClipId);
+
+  return {
+    ...project,
+    clips: [...remainingClips, ...restoredClips],
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+
+

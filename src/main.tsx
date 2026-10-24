@@ -2,6 +2,12 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { installPluginBridge } from "./editor/pluginBridge";
+import { createWailsBridge, isWailsEnvironment } from "./wails/wailsBridge";
+
+if (!window.editorAPI && isWailsEnvironment()) {
+  window.editorAPI = createWailsBridge();
+}
+
 installPluginBridge();
 void document.fonts
   .load('16px \"Noto Sans SC\"')

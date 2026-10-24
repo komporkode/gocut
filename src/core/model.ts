@@ -22,7 +22,7 @@ export const projectDuration = (project: Project): number =>
     (end, clip) => Math.max(end, clip.start + clip.duration),
     0,
   );
-export function createProject(name = "未命名项目"): Project {
+export function createProject(name = "Untitled Project"): Project {
   const now = new Date().toISOString();
   return {
     version: 1,
@@ -34,22 +34,47 @@ export function createProject(name = "未命名项目"): Project {
     background: "#101015",
     assets: [],
     tracks: [
-      createTrack("text", "文字"),
-      createTrack("video", "视频 1"),
-      createTrack("audio", "音频 1"),
+      createTrack("text", "Text"),
+      createTrack("video", "Video 1"),
+      createTrack("audio", "Audio 1"),
     ],
     clips: [],
     createdAt: now,
     updatedAt: now,
   };
 }
+
+export function createSolidColorAsset(
+  color = "#000000",
+  name = "Solid Color",
+  width = 1920,
+  height = 1080,
+): MediaAsset {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="${encodeURIComponent(color)}"/></svg>`;
+  const url = `data:image/svg+xml;utf8,${svg}`;
+  return {
+    id: id(),
+    name,
+    path: `solid:${color}`,
+    url,
+    kind: "image",
+    width,
+    height,
+    duration: 5,
+    fps: 30,
+    hasAudio: false,
+    color,
+    thumbnail: url,
+  };
+}
+
 export function createTrack(kind: TrackKind, name?: string): Track {
   return {
     id: id(),
     kind,
     name:
       name ??
-      { video: "视频", image: "画面", audio: "音频", text: "文字" }[kind],
+      { video: "Video", image: "Video", audio: "Audio", text: "Text" }[kind],
     muted: false,
     hidden: false,
     locked: false,

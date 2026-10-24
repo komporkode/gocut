@@ -18,6 +18,7 @@ import {
   type TransitionId,
 } from "../core/creativePresets";
 import { textPreviewLayer } from "../editor/previewLayers";
+import { useTranslation } from "../i18n";
 
 /** Hover/focus plays the same parameter recipes as the timeline, on bundled original art. */
 export default function PresetPreview({
@@ -33,10 +34,11 @@ export default function PresetPreview({
   adjustments?: Partial<Adjustments>;
   label: string;
 }) {
+  const { t } = useTranslation();
   const canvas = useRef<HTMLCanvasElement>(null),
     [playing, setPlaying] = useState(false);
   const scene = useMemo(() => {
-    const p = createProject("素材预览");
+    const p = createProject("Preset Preview");
     p.width = 640;
     p.height = 360;
     p.background = "#18212b";
@@ -139,7 +141,7 @@ export default function PresetPreview({
   return (
     <button
       className="preset-preview"
-      aria-label={`预览${label}`}
+      aria-label={label}
       aria-pressed={playing}
       onMouseEnter={() => setPlaying(true)}
       onMouseLeave={() => setPlaying(false)}
@@ -148,7 +150,7 @@ export default function PresetPreview({
       onClick={() => setPlaying((p) => !p)}
     >
       <canvas ref={canvas} width={320} height={180} />
-      <small>{playing ? "播放中" : "悬停预览"}</small>
+      <small>{playing ? t("preset.playing") : t("preset.hoverPreview")}</small>
     </button>
   );
 }

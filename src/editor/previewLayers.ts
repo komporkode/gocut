@@ -38,12 +38,10 @@ function canvasFor(
 }
 function adjust(layer: Layer, clip: Clip) {
   const a = clip.adjustments;
+  // Standard brightness, contrast, and saturation are accelerated directly on GPU via ctx.filter in Player
   if (
     !clip.chromaKey?.enabled &&
     !clip.mask &&
-    a.brightness === 0 &&
-    a.contrast === 1 &&
-    a.saturation === 1 &&
     a.temperature === 0
   )
     return;

@@ -141,3 +141,160 @@ it('copy operations do not create a silent half-pair when a partner track is loc
  state().updateTrack(p.tracks[2].id,{locked:true});const before=structuredClone(state().project),history=state().past.length;
  state().duplicate();state().paste();expect(state().project).toEqual(before);expect(state().past).toHaveLength(history);
 });
+
+describe('rippleTrim', () => {
+  it('ripple trims start of clip to playhead and shifts subsequent clips left', async () => {
+    const { rippleTrim } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    const c2 = createClip(p.assets[0], p.tracks[1].id, 8, p.fps);
+    c2.duration = 4;
+    p.clips.push(c2);
+
+    const res = rippleTrim(p, p.clips[0].id, 'start', 2);
+    const first = res.clips.find(c => c.id === p.clips[0].id)!;
+    const second = res.clips.find(c => c.id === c2.id)!;
+
+    expect(first.start).toBe(0);
+    expect(first.duration).toBe(4);
+    expect(first.sourceIn).toBe(4);
+    expect(second.start).toBe(6);
+  });
+
+  it('ripple trims end of clip to playhead and shifts subsequent clips left', async () => {
+    const { rippleTrim } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    const c2 = createClip(p.assets[0], p.tracks[1].id, 8, p.fps);
+    c2.duration = 4;
+    p.clips.push(c2);
+
+    const res = rippleTrim(p, p.clips[0].id, 'end', 4);
+    const first = res.clips.find(c => c.id === p.clips[0].id)!;
+    const second = res.clips.find(c => c.id === c2.id)!;
+
+    expect(first.start).toBe(0);
+    expect(first.duration).toBe(4);
+    expect(second.start).toBe(6);
+  });
+});
+
+describe('closeGap', () => {
+  it('closes gap between two clips on the same track by shifting subsequent clips left', async () => {
+    const { closeGap } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    const c2 = createClip(p.assets[0], p.tracks[1].id, 10, p.fps);
+    c2.duration = 4;
+    p.clips.push(c2);
+
+    const res = closeGap(p, p.tracks[1].id, 7);
+    const second = res.clips.find(c => c.id === c2.id)!;
+    expect(second.start).toBe(6);
+  });
+
+  it('closes initial gap before first clip if clip starts > 0', async () => {
+    const { closeGap } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    p.clips[0].start = 5;
+    const res = closeGap(p, p.tracks[1].id, 2);
+    expect(res.clips[0].start).toBe(0);
+  });
+});
+
+describe('setClipSpeed', () => {
+  it('updates clip speed, scales duration, and ripples subsequent clips when ripple=true', async () => {
+    const { setClipSpeed } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    // p.clips[0] is at start=0, duration=6, speed=1
+    const c2 = createClip(p.assets[0], p.tracks[1].id, 6, p.fps);
+    c2.duration = 4;
+    p.clips.push(c2);
+
+    // Speed up first clip to 2x (duration should become 3s)
+    const res = setClipSpeed(p, p.clips[0].id, 2, true);
+    const first = res.clips.find(c => c.id === p.clips[0].id)!;
+    const second = res.clips.find(c => c.id === c2.id)!;
+
+    expect(first.speed).toBe(2);
+    expect(first.duration).toBe(3);
+    expect(second.start).toBe(3); // 6 + (3 - 6) = 3
+  });
+
+  it('updates clip speed and scales duration without shifting subsequent clips when ripple=false', async () => {
+    const { setClipSpeed } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    const c2 = createClip(p.assets[0], p.tracks[1].id, 6, p.fps);
+    c2.duration = 4;
+    p.clips.push(c2);
+
+    const res = setClipSpeed(p, p.clips[0].id, 2, false);
+    const first = res.clips.find(c => c.id === p.clips[0].id)!;
+    const second = res.clips.find(c => c.id === c2.id)!;
+
+    expect(first.speed).toBe(2);
+    expect(first.duration).toBe(3);
+    expect(second.start).toBe(6);
+  });
+});
+
+describe('Compound Clip (Nest & Unnest)', () => {
+  it('combines multiple clips into a single compound clip container spanning minStart to maxEnd', async () => {
+    const { createCompoundClip } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    const c2 = createClip(p.assets[0], p.tracks[1].id, 6, p.fps);
+    c2.duration = 4;
+    p.clips.push(c2);
+
+    const res = createCompoundClip(p, [p.clips[0].id, c2.id]);
+    expect(res.clips.length).toBe(1);
+    const compound = res.clips[0];
+    expect(compound.isCompound).toBe(true);
+    expect(compound.start).toBe(0);
+    expect(compound.duration).toBe(10);
+    expect(compound.nestedClips?.length).toBe(2);
+  });
+
+  it('restores original nested clips at correct offsets when ungrouping a compound clip', async () => {
+    const { createCompoundClip, ungroupCompoundClip } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    const c2 = createClip(p.assets[0], p.tracks[1].id, 6, p.fps);
+    c2.duration = 4;
+    p.clips.push(c2);
+
+    const nestedProject = createCompoundClip(p, [p.clips[0].id, c2.id]);
+    const compoundId = nestedProject.clips[0].id;
+    const restored = ungroupCompoundClip(nestedProject, compoundId);
+
+    expect(restored.clips.length).toBe(2);
+    expect(restored.clips.find(c => c.id === p.clips[0].id)?.start).toBe(0);
+    expect(restored.clips.find(c => c.id === c2.id)?.start).toBe(6);
+  });
+});
+
+describe('rippleSnapTrack and rippleSnapAllTracks (magnetic)', () => {
+  it('snaps first clip to 00:00 and closes gaps between clips on track', async () => {
+    const { rippleSnapTrack } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    p.clips[0].start = 2; // Clip 1 starts at 2s, duration 6s (ends at 8s)
+    const c2 = createClip(p.assets[0], p.tracks[1].id, 12, p.fps);
+    c2.duration = 4; // Gap of 4s between 8s and 12s
+    p.clips.push(c2);
+
+    const snapped = rippleSnapTrack(p, p.tracks[1].id);
+    const snapClips = snapped.clips.filter(c => c.trackId === p.tracks[1].id).sort((a, b) => a.start - b.start);
+    expect(snapClips[0].start).toBe(0);
+    expect(snapClips[0].duration).toBe(6);
+    expect(snapClips[1].start).toBe(6); // Snapped right against clip 1
+    expect(snapClips[1].duration).toBe(4);
+  });
+
+  it('preserves synchronization of linked audio clips during ripple snap', async () => {
+    const { rippleSnapTrack } = await import('../src/core/timelineEdits');
+    const p = pair();
+    // Pair has video clip on track 1 and audio clip on track 2, both linked
+    p.clips[0].start = 3;
+    p.clips[1].start = 3;
+
+    const snapped = rippleSnapTrack(p, p.tracks[1].id);
+    expect(snapped.clips[0].start).toBe(0);
+    expect(snapped.clips[1].start).toBe(0); // Linked audio shifted by the exact same delta
+  });
+});

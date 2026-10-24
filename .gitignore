@@ -19,3 +19,13 @@ media-tools/
 
 __pycache__/
 *.pyc
+graphify-out/
+.vscode/
+vulture-dead.json
+vulture-deps.json
+vulture-entries.json
+vulture-graph.json
+VULTURE_AUDIT.md
+build/bin/
+bugraph/
+*.exe

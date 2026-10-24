@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { zhCN } from "../src/i18n/locales/zh-CN";
 import { en } from "../src/i18n/locales/en";
+import { id } from "../src/i18n/locales/id";
 import { tr } from "../src/i18n/locales/tr";
 import { read, remember, isLanguage, DEFAULT_LANGUAGE, STORAGE_KEY } from "../src/i18n/languageStore";
 
@@ -10,9 +11,11 @@ describe("i18n Dictionaries Parity", () => {
   it("should have exactly the same keys in all languages", () => {
     const zhKeys = Object.keys(zhCN).sort();
     const enKeys = Object.keys(en).sort();
+    const idKeys = Object.keys(id).sort();
     const trKeys = Object.keys(tr).sort();
 
     expect(enKeys).toEqual(zhKeys);
+    expect(idKeys).toEqual(zhKeys);
     expect(trKeys).toEqual(zhKeys);
   });
 
@@ -23,6 +26,7 @@ describe("i18n Dictionaries Parity", () => {
       const zhPlaceholders = extractPlaceholders(zhCN[key as keyof typeof zhCN]);
       if (zhPlaceholders.length > 0) {
         expect(extractPlaceholders(en[key as keyof typeof en])).toEqual(zhPlaceholders);
+        expect(extractPlaceholders(id[key as keyof typeof id])).toEqual(zhPlaceholders);
         expect(extractPlaceholders(tr[key as keyof typeof tr])).toEqual(zhPlaceholders);
       }
     });
@@ -42,6 +46,7 @@ describe("languageStore Preferences & Fallbacks", () => {
   it("should validate supported languages correctly", () => {
     expect(isLanguage("zh-CN")).toBe(true);
     expect(isLanguage("en")).toBe(true);
+    expect(isLanguage("id")).toBe(true);
     expect(isLanguage("tr")).toBe(true);
     expect(isLanguage("fr")).toBe(false);
     expect(isLanguage(null)).toBe(false);

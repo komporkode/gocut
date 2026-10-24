@@ -70,7 +70,7 @@
 .media-import {
   padding: 6px 9px !important;
   background: #393939 !important;
-  color: #16c4cb !important;
+  color: #a78bfa !important;
   font-size: 10px;
   white-space: nowrap;
 }
@@ -545,4 +545,21 @@
   .media-top-title { font-size: 11px; }
   .media-top-title svg { display: none; }
   .media-top-title b { font-size: 8px; }
+}
+
+.media-used-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  bottom: auto;
+  background: var(--accent) !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: #fff !important;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  z-index: 3;
 }

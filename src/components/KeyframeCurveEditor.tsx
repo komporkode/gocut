@@ -15,6 +15,7 @@ import {
   type KeyClipboard,
 } from "../core/keyframeEdits";
 import { useEditorStore } from "../editor/store";
+import { useTranslation } from "../i18n";
 import "./KeyframeCurveEditor.css";
 
 // Internal clipboard only: no operating-system clipboard access or private data reads.
@@ -38,6 +39,21 @@ export default function KeyframeCurveEditor({
   visual: boolean;
   onUpdate(patch: Partial<Clip>): void;
 }) {
+  const { t } = useTranslation();
+  const propertyLabels: Record<Keyframe["property"], string> = {
+    x: t("inspector.positionX"),
+    y: t("inspector.positionY"),
+    scale: t("inspector.scale"),
+    rotation: t("inspector.rotation"),
+    opacity: t("inspector.opacity"),
+    volume: t("inspector.volume"),
+  };
+  const easingLabels: Record<Keyframe["easing"], string> = {
+    linear: t("keyframes.linear"),
+    easeIn: t("keyframes.easeIn"),
+    easeOut: t("keyframes.easeOut"),
+    easeInOut: t("keyframes.easeInOut"),
+  };
   const [property, setProperty] = useState<Keyframe["property"]>(
     visual ? "x" : "volume",
   );
@@ -172,7 +188,7 @@ export default function KeyframeCurveEditor({
     safe(() => {
       if (!chosen || locked) return;
       if (!text.trim() || !Number.isFinite(Number(text)))
-        throw new Error("请输入有限数值");
+        throw new Error("Invalid finite number");
       onUpdate({
         keyframes: editKey(project, clip, chosen.id, { [field]: Number(text) }),
       });
@@ -180,7 +196,7 @@ export default function KeyframeCurveEditor({
   return (
     <section
       className="keyframe-curve"
-      aria-label="关键帧曲线编辑器"
+      aria-label={t("curve.title")}
       onKeyDown={(e) => {
         if ((e.target as HTMLElement).closest("input,select")) {
           e.stopPropagation();
@@ -202,9 +218,9 @@ export default function KeyframeCurveEditor({
       }}
     >
       <header>
-        <h3>关键帧曲线</h3>
+        <h3>{t("curve.title")}</h3>
         <select
-          aria-label="曲线属性"
+          aria-label={t("curve.propertyAria")}
           value={property}
           onChange={(e) => {
             endDrag();
@@ -215,7 +231,7 @@ export default function KeyframeCurveEditor({
         >
           {KEY_PROPERTIES.filter((p) => visual || p === "volume").map((p) => (
             <option key={p} value={p}>
-              {KEY_LABELS[p]}
+              {propertyLabels[p]}
             </option>
           ))}
         </select>
@@ -223,7 +239,7 @@ export default function KeyframeCurveEditor({
       <svg
         viewBox={`0 0 ${W} ${H}`}
         role="group"
-        aria-label={`${KEY_LABELS[property]}关键帧曲线`}
+        aria-label={`${propertyLabels[property]} ${t("curve.title")}`}
         tabIndex={0}
         onPointerMove={(e) => {
           const d = drag.current;
@@ -281,7 +297,7 @@ export default function KeyframeCurveEditor({
             data-key-id={k.id}
             role="button"
             tabIndex={0}
-            aria-label={`关键帧 ${property} ${k.time.toFixed(3)} 秒`}
+            aria-label={`${t("keyframes.title")} ${property} ${k.time.toFixed(3)}s`}
             aria-pressed={selected.includes(k.id)}
             cx={x(k.time)}
             cy={y(k.value)}
@@ -341,10 +357,7 @@ export default function KeyframeCurveEditor({
           />
         ))}
       </svg>
-      <p className="field-hint">
-        拖动点调整时间与数值；Shift
-        点击多选。缓动作用于到达该点的区间。时间为片段内秒数。
-      </p>
+      <p className="field-hint">{t("curve.helpHint")}</p>
       <div className="curve-actions">
         <button
           disabled={locked}
@@ -355,31 +368,21 @@ export default function KeyframeCurveEditor({
               setSelected([result.id]);
             })
           }
-        >
-          添加当前帧
-        </button>
-        <button disabled={!selected.length} onClick={copy}>
-          复制关键帧
-        </button>
-        <button disabled={locked || !clipboard} onClick={paste}>
-          粘贴到播放头
-        </button>
-        <button disabled={locked || !selected.length} onClick={remove}>
-          删除选中关键帧
-        </button>
+        >{t("curve.addCurrentFrame")}</button>
+        <button disabled={!selected.length} onClick={copy}>{t("curve.copyKeyframe")}</button>
+        <button disabled={locked || !clipboard} onClick={paste}>{t("curve.pasteToPlayhead")}</button>
+        <button disabled={locked || !selected.length} onClick={remove}>{t("curve.deleteSelected")}</button>
         <button
           disabled={!keys.length}
           onClick={() => setSelected(keys.map((k) => k.id))}
-        >
-          选择此曲线全部
-        </button>
+        >{t("curve.selectAll")}</button>
       </div>
       {chosen && (
         <div className="curve-fields">
           <label>
-            时间（秒）
+            {t("curve.timeSec")}
             <input
-              aria-label="选中关键帧时间"
+              aria-label={t("curve.timeSec")}
               type="number"
               min="0"
               max={clip.duration}
@@ -394,9 +397,9 @@ export default function KeyframeCurveEditor({
             />
           </label>
           <label>
-            数值
+            {t("curve.value")}
             <input
-              aria-label="选中关键帧数值"
+              aria-label={t("curve.value")}
               type="number"
               min={limits[0]}
               max={limits[1]}
@@ -411,9 +414,9 @@ export default function KeyframeCurveEditor({
             />
           </label>
           <label>
-            进入该点的缓动
+            {t("curve.easingIntoPoint")}
             <select
-              aria-label="曲线缓动"
+              aria-label={t("keyframes.easing")}
               disabled={locked}
               value={chosen.easing}
               onChange={(e) =>
@@ -428,15 +431,13 @@ export default function KeyframeCurveEditor({
             >
               {EASINGS.map((e) => (
                 <option key={e} value={e}>
-                  {EASING_LABELS[e]}
+                  {easingLabels[e]}
                 </option>
               ))}
             </select>
           </label>
           {chosen.easingWindow && (
-            <p className="field-hint">
-              保留了裁剪后的曲线区间；切换缓动将重置该区间。
-            </p>
+            <p className="field-hint">{t("curve.trimmedRangeHint")}</p>
           )}
         </div>
       )}

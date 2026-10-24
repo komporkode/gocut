@@ -94,6 +94,22 @@ describe("timeline positioning", () => {
       false,
     );
   });
+  it("keeps playhead at the same visual viewport position during zoom", async () => {
+    const { calculateZoomScroll } = await import("../src/components/Timeline");
+    // Playhead at 10s, oldPps = 20 (px = 200). scrollLeft = 50. Visual offset = 150.
+    // Zoom to newPps = 40 (px = 400).
+    // Expected new scrollLeft: 400 - 150 = 250.
+    const newScroll = calculateZoomScroll(10, 20, 40, 50, 800);
+    expect(newScroll).toBe(250);
+  });
+  it("allows moving video clips across vertical overlay tracks", () => {
+    const p = createProject();
+    const clip = createClip(video, p.tracks[1].id, 0, 30);
+    const videoTrack2 = createTrack("video", "Video 2");
+    p.tracks.unshift(videoTrack2);
+    expect(canMoveToTrack(clip, videoTrack2, p)).toBe(true);
+    expect(canMoveToTrack(clip, p.tracks.find(t => t.kind === "audio")!, p)).toBe(false);
+  });
 });
 describe("local effects", () => {
   it("constructs complete adjustment parameters using multiplicative defaults", () => {

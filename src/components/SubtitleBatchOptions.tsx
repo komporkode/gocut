@@ -1,27 +1,31 @@
+import { useTranslation } from "../i18n";
 import type {
   SubtitleAnimation,
   SubtitleStyleValues,
 } from "../core/subtitleWorkflow";
-const motions = [
-  ["none", "无"],
-  ["fade", "淡入 / 淡出"],
-  ["slide-up", "向上滑动 + 渐显隐"],
-  ["zoom", "缩放 + 渐显隐"],
-] as const;
+
 export function SubtitleAnimationForm({
   value,
   onChange,
 }: {
   value: SubtitleAnimation;
-  onChange(v: SubtitleAnimation): void;
+  onChange: (v: SubtitleAnimation) => void;
 }) {
+  const { t } = useTranslation();
+  const motions = [
+    ["none", t("subtitles.animNone")],
+    ["fade", t("subtitles.animFade")],
+    ["slide-up", t("subtitles.animSlideUp")],
+    ["zoom", t("subtitles.animZoom")],
+  ] as const;
+
   return (
     <div className="subtitle-options">
       {(["entrance", "exit"] as const).map((phase, i) => (
         <label key={phase}>
-          {i ? "出场" : "入场"}动画
+          {i ? t("subtitles.outAnimation") : t("subtitles.inAnimation")}
           <select
-            aria-label={i ? "字幕出场动画" : "字幕入场动画"}
+            aria-label={i ? t("subtitles.outAnimation") : t("subtitles.inAnimation")}
             value={value[phase]}
             onChange={(e) => onChange({ ...value, [phase]: e.target.value })}
           >
@@ -35,9 +39,9 @@ export function SubtitleAnimationForm({
       ))}
       {(["inDuration", "outDuration"] as const).map((field, i) => (
         <label key={field}>
-          {i ? "出场" : "入场"}秒数
+          {i ? t("subtitles.outSec") : t("subtitles.inSec")}
           <input
-            aria-label={i ? "字幕出场秒数" : "字幕入场秒数"}
+            aria-label={i ? t("subtitles.outSec") : t("subtitles.inSec")}
             type="number"
             min="0"
             max="60"
@@ -50,9 +54,9 @@ export function SubtitleAnimationForm({
         </label>
       ))}
       <label>
-        滑动距离（项目像素）
+        {t("subtitles.slideDistance")}
         <input
-          aria-label="字幕滑动距离"
+          aria-label={t("subtitles.slideDistance")}
           type="number"
           min="0"
           max="10000"
@@ -63,22 +67,22 @@ export function SubtitleAnimationForm({
         />
       </label>
       <label>
-        停留动画
+        {t("subtitles.holdAnimation")}
         <select
-          aria-label="字幕停留动画"
+          aria-label={t("subtitles.holdAnimation")}
           value={value.hold ?? "still"}
           onChange={(e) =>
             onChange({ ...value, hold: e.target.value as "still" | "pulse" })
           }
         >
-          <option value="still">静止</option>
-          <option value="pulse">一次呼吸缩放</option>
+          <option value="still">{t("subtitles.holdStill")}</option>
+          <option value="pulse">{t("subtitles.holdPulse")}</option>
         </select>
       </label>
       <label>
-        呼吸放大幅度（%）
+        {t("subtitles.pulseAmp")}
         <input
-          aria-label="字幕呼吸幅度"
+          aria-label={t("subtitles.pulseAmp")}
           type="number"
           min="0"
           max="50"
@@ -90,28 +94,26 @@ export function SubtitleAnimationForm({
           }
         />
       </label>
-      <p className="subtitle-hint">
-        停留 = 每条字幕时长 − 入场 −
-        出场，静止至少留一帧、呼吸至少两帧。应用会替换 Y / 缩放 /
-        透明度关键帧及画面淡化；位置
-        X、旋转保留。结果可在“动画”曲线中继续编辑。本表参数用于下一次应用，不从已有曲线反推预设。
-      </p>
+      <p className="subtitle-hint">{t("subtitles.holdDesc")}</p>
     </div>
   );
 }
+
 export function SubtitleStyleForm({
   value,
   onChange,
 }: {
   value: SubtitleStyleValues;
-  onChange(v: SubtitleStyleValues): void;
+  onChange: (v: SubtitleStyleValues) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="subtitle-options">
       <label>
-        字号
+        {t("subtitles.fontSize")}
         <input
-          aria-label="批量字幕字号"
+          aria-label={t("subtitles.fontSize")}
           type="number"
           min="1"
           max="1000"
@@ -122,27 +124,27 @@ export function SubtitleStyleForm({
         />
       </label>
       <label>
-        文字颜色
+        {t("subtitles.textColor")}
         <input
-          aria-label="批量字幕颜色"
+          aria-label={t("subtitles.textColor")}
           type="color"
           value={value.color}
           onChange={(e) => onChange({ ...value, color: e.target.value })}
         />
       </label>
       <label>
-        描边颜色
+        {t("subtitles.strokeColor")}
         <input
-          aria-label="批量字幕描边颜色"
+          aria-label={t("subtitles.strokeColor")}
           type="color"
           value={value.stroke}
           onChange={(e) => onChange({ ...value, stroke: e.target.value })}
         />
       </label>
       <label>
-        描边宽度
+        {t("subtitles.strokeWidth")}
         <input
-          aria-label="批量字幕描边宽度"
+          aria-label={t("subtitles.strokeWidth")}
           type="number"
           min="0"
           max="100"
@@ -153,17 +155,17 @@ export function SubtitleStyleForm({
         />
       </label>
       <label>
-        背景（transparent 或十六进制色）
+        {t("subtitles.background")}
         <input
-          aria-label="批量字幕背景"
+          aria-label={t("subtitles.background")}
           value={value.background}
           onChange={(e) => onChange({ ...value, background: e.target.value })}
         />
       </label>
       <label>
-        对齐
+        {t("subtitles.align")}
         <select
-          aria-label="批量字幕对齐"
+          aria-label={t("subtitles.align")}
           value={value.align}
           onChange={(e) =>
             onChange({
@@ -172,23 +174,21 @@ export function SubtitleStyleForm({
             })
           }
         >
-          <option value="left">左对齐</option>
-          <option value="center">居中</option>
-          <option value="right">右对齐</option>
+          <option value="left">{t("subtitles.alignLeft")}</option>
+          <option value="center">{t("subtitles.alignCenter")}</option>
+          <option value="right">{t("subtitles.alignRight")}</option>
         </select>
       </label>
       <label>
         <input
-          aria-label="批量字幕粗体"
+          aria-label={t("subtitles.bold")}
           type="checkbox"
           checked={value.bold}
           onChange={(e) => onChange({ ...value, bold: e.target.checked })}
         />
-        粗体
+        {t("subtitles.bold")}
       </label>
-      <p className="subtitle-hint">
-        应用以上字段，保留各条字幕的字体、文案、位置、时间和动画。需要统一字体时，可使用“统一样式”参考字幕。
-      </p>
+      <p className="subtitle-hint">{t("subtitles.styleBatchDesc")}</p>
     </div>
   );
 }

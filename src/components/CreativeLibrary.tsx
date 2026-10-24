@@ -9,7 +9,9 @@ import {
   type TransitionId,
 } from "../core/creativePresets";
 import PresetPreview from "./PresetPreview";
+import { useTranslation } from "../i18n";
 import "./CreativeLibrary.css";
+
 function SearchBox({
   value,
   onChange,
@@ -17,23 +19,27 @@ function SearchBox({
   value: string;
   onChange: (text: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <label className="creative-search">
       <Search size={14} />
       <input
-        aria-label="搜索预设"
-        placeholder="搜索名称或用途"
+        aria-label={t("creative.search")}
+        placeholder={t("creative.searchPlaceholder")}
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
     </label>
   );
 }
+
 function Footer() {
+  const { t } = useTranslation();
   return (
-    <footer className="creative-footer">自主编写 · MIT 许可 · 离线可用</footer>
+    <footer className="creative-footer">{t("creative.footerNotice")}</footer>
   );
 }
+
 export function TextLibrary({
   onAdd,
   onBlank,
@@ -41,42 +47,53 @@ export function TextLibrary({
   onAdd: (preset: TextPreset) => void;
   onBlank: () => void;
 }) {
+  const { t } = useTranslation();
+  const categoryLabels: Record<string, string> = {
+    "all": t("media.filterAll"),
+    "Title": t("creative.catTitle"),
+    "Subtitle": t("nav.subtitles"),
+    "Badge": t("creative.catBadge"),
+    "Dynamic": t("creative.catDynamic"),
+    "全部": t("media.filterAll"),
+    "标题": t("creative.catTitle"),
+    "字幕": t("nav.subtitles"),
+    "标记": t("creative.catBadge"),
+    "动态": t("creative.catDynamic"),
+  };
   const [query, setQuery] = useState(""),
-    [category, setCategory] = useState("全部");
+    [category, setCategory] = useState("all");
   const presets = TEXT_PRESETS.filter(
     (p) =>
-      (category === "全部" || category === p.category) &&
+      (category === "all" || category === "全部" || category === p.category) &&
       (p.name + p.style.text)
         .toLowerCase()
         .includes(query.toLowerCase().trim()),
   );
   return (
-    <section className="creative-library" aria-label="文字模板库">
+    <section className="creative-library" aria-label={t("creative.textLibrary")}>
       <header>
         <strong>
-          文字模板 <small>{TEXT_PRESETS.length}</small>
+          {t("creative.textPresets")} <small>{TEXT_PRESETS.length}</small>
         </strong>
         <button onClick={onBlank}>
-          <Type size={12} /> 添加文本
+          <Type size={12} /> {t("creative.addText")}
         </button>
       </header>
       <SearchBox value={query} onChange={setQuery} />
-      <div className="creative-tabs" role="tablist" aria-label="文字模板分类">
-        {["全部", "标题", "字幕", "标记", "动态"].map((c) => (
+      <div className="creative-tabs" role="tablist" aria-label={t("creative.category")}>
+        {["all", "Title", "Subtitle", "Badge", "Dynamic"].map((c) => (
           <button
             key={c}
             role="tab"
             aria-selected={category === c}
             onClick={() => setCategory(c)}
           >
-            {c}
+            {categoryLabels[c] || c}
           </button>
         ))}
       </div>
       <div className="creative-scroll">
-        <p className="creative-help">
-          添加到播放头位置；内容、字体、描边和动画均可编辑。
-        </p>
+        <p className="creative-help">{t("creative.textHelp")}</p>
         <div className="creative-grid">
           {presets.map((p) => (
             <article className="creative-card" key={p.id} data-preset-id={p.id}>
@@ -84,10 +101,10 @@ export function TextLibrary({
               <div>
                 <span>
                   {p.name}
-                  <small>{p.category} · 可编辑文字</small>
+                  <small>{categoryLabels[p.category] || p.category} · {t("creative.editableText")}</small>
                 </span>
                 <button
-                  aria-label={`添加${p.name}模板`}
+                  aria-label={`${t("timeline.addMedia")}: ${p.name}`}
                   onClick={() => onAdd(p)}
                 >
                   <Plus size={14} />
@@ -97,13 +114,14 @@ export function TextLibrary({
           ))}
         </div>
         {!presets.length && (
-          <p className="creative-empty">没有匹配的文字模板</p>
+          <p className="creative-empty">{t("creative.noTextPresets")}</p>
         )}
       </div>
       <Footer />
     </section>
   );
 }
+
 export function MotionLibrary({
   disabled,
   onApply,
@@ -111,6 +129,7 @@ export function MotionLibrary({
   disabled: boolean;
   onApply: (motion: MotionId) => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const presets = MOTION_PRESETS.filter((p) =>
     (p.name + p.description).includes(query.trim()),
@@ -118,9 +137,7 @@ export function MotionLibrary({
   return (
     <>
       <SearchBox value={query} onChange={setQuery} />
-      <p className="creative-help">
-        应用到所选画面或文字。覆盖对应属性的关键帧；其他属性保留，可撤销。
-      </p>
+      <p className="creative-help">{t("creative.motionHelp")}</p>
       <div className="creative-grid">
         {presets.map((p) => (
           <article className="creative-card" key={p.id} data-preset-id={p.id}>
@@ -128,11 +145,11 @@ export function MotionLibrary({
             <div>
               <span title={p.description}>
                 {p.name}
-                <small>关键帧动效</small>
+                <small>{t("creative.keyframeMotion")}</small>
               </span>
               <button
                 disabled={disabled}
-                aria-label={`应用${p.name}特效`}
+                aria-label={`${t("effects.apply")} ${p.name}`}
                 onClick={() => onApply(p.id)}
               >
                 <Plus size={14} />
@@ -141,10 +158,11 @@ export function MotionLibrary({
           </article>
         ))}
       </div>
-      {!presets.length && <p className="creative-empty">没有匹配的动效</p>}
+      {!presets.length && <p className="creative-empty">{t("creative.noMotionPresets")}</p>}
     </>
   );
 }
+
 export function TransitionLibrary({
   disabled,
   onApply,
@@ -152,40 +170,51 @@ export function TransitionLibrary({
   disabled: boolean;
   onApply: (transition: TransitionId, seconds: number) => void;
 }) {
+  const { t } = useTranslation();
+  const transCategories: Record<string, string> = {
+    "all": t("media.filterAll"),
+    "Basic": t("creative.catBasic"),
+    "Motion": t("creative.catCamera"),
+    "Dynamic": t("creative.catDynamic"),
+    "全部": t("media.filterAll"),
+    "基础": t("creative.catBasic"),
+    "运镜": t("creative.catCamera"),
+    "动感": t("creative.catDynamic"),
+  };
   const [query, setQuery] = useState(""),
-    [category, setCategory] = useState("全部"),
+    [category, setCategory] = useState("all"),
     [seconds, setSeconds] = useState(0.5);
   const presets = TRANSITION_PRESETS.filter(
     (p) =>
-      (category === "全部" || category === p.category) &&
+      (category === "all" || category === "全部" || category === p.category) &&
       (p.name + p.description).includes(query.trim()),
   );
   return (
-    <section className="creative-library" aria-label="转场素材库">
+    <section className="creative-library" aria-label={t("creative.transitionLibrary")}>
       <header>
         <strong>
-          画面转场 <small>{TRANSITION_PRESETS.length}</small>
+          {t("creative.videoTransitions")} <small>{TRANSITION_PRESETS.length}</small>
         </strong>
-        <span>本地生成</span>
+        <span>{t("creative.localGenerated")}</span>
       </header>
       <SearchBox value={query} onChange={setQuery} />
-      <div className="creative-tabs" role="tablist" aria-label="转场分类">
-        {["全部", "基础", "运镜", "动感"].map((c) => (
+      <div className="creative-tabs" role="tablist" aria-label={t("creative.category")}>
+        {["all", "Basic", "Motion", "Dynamic"].map((c) => (
           <button
             key={c}
             role="tab"
             aria-selected={category === c}
             onClick={() => setCategory(c)}
           >
-            {c}
+            {transCategories[c] || c}
           </button>
         ))}
       </div>
       <label className="creative-duration">
-        转场时长
+        {t("creative.transitionDuration")}
         <input
           type="number"
-          aria-label="转场时长"
+          aria-label={t("creative.transitionDuration")}
           min={0.05}
           max={5}
           step={0.05}
@@ -196,27 +225,37 @@ export function TransitionLibrary({
               setSeconds(Math.max(0.05, Math.min(5, value)));
           }}
         />
-        秒
+        s
       </label>
       <div className="creative-scroll">
-        <p className="creative-help">
-          选择同轨相邻画面的前一段。时长按帧与片段长度限制；除「经过背景」外，后段会提前重叠。运镜会替换后段开头对应的关键帧。
-        </p>
+        <p className="creative-help">{t("creative.transitionHelp")}</p>
         <div className="creative-grid">
           {presets.map((p) => (
-            <article className="creative-card" key={p.id} data-preset-id={p.id}>
+            <article
+              className="creative-card is-draggable"
+              key={p.id}
+              data-preset-id={p.id}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData("application/x-gocut-transition", p.id);
+                e.dataTransfer.setData("application/x-reacut-transition", p.id);
+                e.dataTransfer.setData("application/x-transition-duration", String(seconds));
+                e.dataTransfer.setData("text/plain", p.id);
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+            >
               <PresetPreview transition={p.id} label={p.name} />
               <div>
                 <span title={p.description}>
                   {p.name}
                   <small>
-                    {p.category} · {p.description}
+                    {transCategories[p.category] || p.category} · {p.description}
                   </small>
                 </span>
                 <button
                   disabled={disabled}
                   className="transition-apply"
-                  aria-label={`应用${p.name}转场`}
+                  aria-label={`${t("effects.apply")} ${p.name}`}
                   onClick={() => onApply(p.id, seconds)}
                 >
                   <Plus size={14} />
@@ -225,7 +264,7 @@ export function TransitionLibrary({
             </article>
           ))}
         </div>
-        {!presets.length && <p className="creative-empty">没有匹配的转场</p>}
+        {!presets.length && <p className="creative-empty">{t("creative.noTransitionPresets")}</p>}
       </div>
       <Footer />
     </section>

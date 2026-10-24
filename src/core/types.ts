@@ -18,6 +18,7 @@ export interface MediaAsset {
   missing?: boolean;
   previewUrl?: string;
   previewError?: string;
+  color?: string;
 }
 export interface Transform {
   x: number;
@@ -105,6 +106,8 @@ export interface Clip {
   crop?: CropRect;
   chromaKey?: ChromaKey;
   mask?: ShapeMask;
+  isCompound?: boolean;
+  nestedClips?: Clip[];
 }
 export interface Track {
   id: string;
@@ -136,6 +139,7 @@ export interface ExportOptions {
   fps: number;
   quality: "draft" | "standard" | "high";
   format: "mp4" | "mov";
+  encoder?: "auto" | "gpu" | "cpu";
 }
 export interface ExportProgress {
   jobId: string;
@@ -244,6 +248,7 @@ export interface EditorAPI {
   writeTextFile: (text: string, name: string) => Promise<string | null>;
   revealPath: (path: string) => Promise<void>;
   getPathForFile: (file: File) => string;
+  onNativeFileDrop?: (callback: (paths: string[]) => void) => () => void;
 }
 declare global {
   interface Window {

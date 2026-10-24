@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Grid,
   Maximize,
   Pause,
   Play,
@@ -9,6 +10,9 @@ import {
   VolumeX,
   ZoomIn,
 } from "lucide-react";
+import CanvasTransformGizmo from "./CanvasTransformGizmo";
+import SafeZoneOverlay, { type SafeZoneMode } from "./SafeZoneOverlay";
+import AudioVuMeter from "./AudioVuMeter";
 import type { Clip, MediaAsset, Project } from "../core/types";
 import {
   evaluateKeyframes,
@@ -22,11 +26,12 @@ import {
   clearPreviewLayers,
 } from "../editor/previewLayers";
 import { useEditorStore } from "../editor/store";
+import { useTranslation } from "../i18n";
 interface PlayerProps {
   project: Project;
   selectedIds: string[];
-  playhead: number;
-  playing: boolean;
+  playhead?: number;
+  playing?: boolean;
   onSelect: (ids: string[]) => void;
   onUpdateClip: (id: string, patch: Partial<Clip>) => void;
   onSeek: (time: number) => void;
@@ -39,20 +44,29 @@ interface Source {
   decodedTime?: number;
   frameCallback?: number;
 }
-export default function Player({
-  project,
-  selectedIds,
-  playhead,
-  playing,
-  onSeek,
-  onPlayingChange,
-  onSelect,
-  onUpdateClip,
-}: PlayerProps) {
+export default function Player(props: PlayerProps) {
+  const { t } = useTranslation();
+  const storePlayhead = useEditorStore((s) => s.playhead);
+  const storePlaying = useEditorStore((s) => s.playing);
+  const updateProject = useEditorStore((s) => s.updateProject);
+  const playhead = props.playhead ?? storePlayhead;
+  const playing = props.playing ?? storePlaying;
+  const {
+    project,
+    selectedIds,
+    onSeek,
+    onPlayingChange,
+    onSelect,
+    onUpdateClip,
+  } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null),
     hostRef = useRef<HTMLDivElement>(null);
   const sources = useRef(new Map<string, Source>()),
-    audioContext = useRef<AudioContext | null>(null);
+    audioContext = useRef<AudioContext | null>(null),
+    masterGainRef = useRef<GainNode | null>(null),
+    analyserRef = useRef<AnalyserNode | null>(null);
+  const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
+  const [safeZoneMode, setSafeZoneMode] = useState<SafeZoneMode>("none");
   const current = useRef({ project, playhead, playing });
   current.current = { project, playhead, playing };
   const [muted, setMuted] = useState(false),
@@ -105,13 +119,42 @@ export default function Player({
         asset.kind === "image"
           ? new Image()
           : document.createElement(asset.kind === "audio" ? "audio" : "video");
+      const source: Source = { element, url };
       if (element instanceof HTMLMediaElement) {
         element.preload = "auto";
-        element.crossOrigin = "anonymous";
-        if (element instanceof HTMLVideoElement) element.playsInline = true;
-      } else element.crossOrigin = "anonymous";
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+          element.crossOrigin = "anonymous";
+        }
+        if (element instanceof HTMLVideoElement) {
+          element.playsInline = true;
+          const video = element;
+          const decoded: VideoFrameRequestCallback = (_, metadata) => {
+            source.decodedTime = metadata.mediaTime;
+            source.frameCallback = video.requestVideoFrameCallback(decoded);
+          };
+          source.frameCallback = video.requestVideoFrameCallback(decoded);
+          video.addEventListener("canplay", () => {
+            if (!current.current.playing) {
+              renderFrame(current.current.playhead, false);
+            }
+          });
+          video.addEventListener("seeked", () => {
+            if (!current.current.playing) {
+              renderFrame(current.current.playhead, false);
+            }
+          });
+        }
+      } else if (element instanceof HTMLImageElement) {
+        if (url.startsWith("http://") || url.startsWith("https://")) {
+          element.crossOrigin = "anonymous";
+        }
+        element.onload = () => {
+          if (!current.current.playing) {
+            renderFrame(current.current.playhead, false);
+          }
+        };
+      }
       element.src = url;
-      const source: Source = { element, url };
       element.addEventListener(
         "error",
         () =>
@@ -122,14 +165,6 @@ export default function Player({
           ),
         { once: true },
       );
-      if (element instanceof HTMLVideoElement) {
-        const video = element;
-        const decoded: VideoFrameRequestCallback = (_, metadata) => {
-          source.decodedTime = metadata.mediaTime;
-          source.frameCallback = video.requestVideoFrameCallback(decoded);
-        };
-        source.frameCallback = video.requestVideoFrameCallback(decoded);
-      }
       sources.current.set(clip.id, source);
     }
     for (const [clipId, source] of sources.current)
@@ -171,188 +206,223 @@ export default function Player({
       const context =
         audioContext.current ?? (audioContext.current = new AudioContext());
       void context.resume();
+
+      if (!masterGainRef.current) {
+        masterGainRef.current = context.createGain();
+      }
+      if (!analyserRef.current) {
+        const analyser = context.createAnalyser();
+        analyser.fftSize = 256;
+        analyser.smoothingTimeConstant = 0.8;
+        masterGainRef.current.connect(analyser);
+        analyser.connect(context.destination);
+        analyserRef.current = analyser;
+        setAnalyserNode(analyser);
+      }
+
       for (const source of sources.current.values())
         if (source.element instanceof HTMLMediaElement && !source.gain) {
           const media = context.createMediaElementSource(source.element);
           source.gain = context.createGain();
           media.connect(source.gain);
-          source.gain.connect(context.destination);
+          source.gain.connect(masterGainRef.current);
         }
     } catch {
       /* Media elements still provide ordinary volume. */
     }
   };
+  const renderFrame = (time: number, isPlaying: boolean) => {
+    const p = current.current.project,
+      end = projectDuration(p);
+    // Keep the final decoded frame visible when playback reaches the project end.
+    const paintTime =
+      end > 0 ? Math.min(time, Math.max(0, end - 1 / p.fps)) : time;
+    const canvas = canvasRef.current,
+      ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    const factor = canvas.width / p.width;
+    ctx.setTransform(factor, 0, 0, factor, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.filter = "none";
+    ctx.fillStyle = p.background;
+    ctx.fillRect(0, 0, p.width, p.height);
+    const clips = [...p.tracks]
+      .reverse()
+      .flatMap((track) =>
+        p.clips
+          .filter((c) => c.trackId === track.id)
+          .sort((a, b) => a.start - b.start),
+      );
+    for (const clip of clips) {
+      const track = p.tracks.find((t) => t.id === clip.trackId)!;
+      const active =
+        paintTime >= clip.start && paintTime < clip.start + clip.duration;
+      const source = sources.current.get(clip.id);
+      const media = source?.element;
+      const evaluated = evaluateKeyframes(
+        clip,
+        Math.max(0, paintTime - clip.start),
+      );
+      const local = Math.max(0, paintTime - clip.start);
+      if (media instanceof HTMLMediaElement) {
+        if (!active) {
+          media.pause();
+          if (source?.gain) source.gain.gain.value = 0;
+          continue;
+        }
+        if (isPlaying && !source?.gain) initializeAudio();
+        // Chromium seeks at microsecond precision. Nudge exact frame boundaries
+        // inside the intended frame instead of rounding down to its predecessor.
+        const target = clip.sourceIn + local * clip.speed + 0.000001;
+        if (
+          Number.isFinite(media.duration) &&
+          Math.abs(media.currentTime - target) >
+            (isPlaying ? 0.15 : 0.00001)
+        ) {
+          try {
+            media.currentTime = Math.min(target, media.duration);
+          } catch {
+            /* Source metadata loading. */
+          }
+        }
+        media.playbackRate = clip.speed;
+        let gain =
+          track.muted || clip.muted || localMuted.current
+            ? 0
+            : evaluated.volume;
+        gain *= evaluateFade(clip, local, "audio");
+        if (source?.gain) {
+          source.gain.gain.value = gain;
+          media.volume = 1;
+        } else media.volume = Math.min(1, gain);
+        if (isPlaying && media.paused) void media.play().catch(() => {});
+        if (!isPlaying && !media.paused) media.pause();
+      }
+      if (!active || track.hidden || track.kind === "audio") continue;
+      const alpha =
+        evaluated.transform.opacity * evaluateFade(clip, local, "video");
+      const movement =
+        drag.current?.clip.id === clip.id ? drag.current : null;
+      const tr = movement
+        ? {
+            ...evaluated.transform,
+            x: evaluated.transform.x + movement.dx,
+            y: evaluated.transform.y + movement.dy,
+          }
+        : evaluated.transform;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.translate(p.width / 2 + tr.x, p.height / 2 + tr.y);
+      ctx.rotate((tr.rotation * Math.PI) / 180);
+      ctx.scale(
+        tr.scale * (tr.flipX ? -1 : 1),
+        tr.scale * (tr.flipY ? -1 : 1),
+      );
+      const a = clip.adjustments;
+      const filters: string[] = [];
+      if (a.blur > 0) filters.push(`blur(${a.blur * factor}px)`);
+      if (!clip.chromaKey?.enabled && !clip.mask && a.temperature === 0) {
+        if (a.brightness !== 0) filters.push(`brightness(${Math.max(0, 1 + a.brightness)})`);
+        if (a.contrast !== 1) filters.push(`contrast(${Math.max(0, a.contrast)})`);
+        if (a.saturation !== 1) filters.push(`saturate(${Math.max(0, a.saturation)})`);
+      }
+      ctx.filter = filters.length > 0 ? filters.join(" ") : "none";
+      if (clip.text) {
+        const layer = textPreviewLayer(clip);
+        ctx.drawImage(
+          layer.canvas,
+          -layer.width / 2,
+          -layer.height / 2,
+          layer.width,
+          layer.height,
+        );
+      } else if (media) {
+        const asset = p.assets.find((a) => a.id === clip.assetId)!;
+        try {
+          if (!(
+            (media instanceof HTMLVideoElement && media.readyState < 2) ||
+            (media instanceof HTMLImageElement && !media.complete)
+          )) {
+            const previewScale = Math.min(
+              1,
+              1920 / asset.width,
+              1920 / asset.height,
+            );
+            const layer = imagePreviewLayer(
+              clip,
+              media as HTMLImageElement | HTMLVideoElement,
+              Math.max(1, Math.round(asset.width * previewScale)),
+              Math.max(1, Math.round(asset.height * previewScale)),
+              source?.decodedTime,
+            );
+            const contain = Math.min(
+              p.width / layer.width,
+              p.height / layer.height,
+            );
+            const w = layer.width * contain,
+              h = layer.height * contain;
+            ctx.drawImage(layer, -w / 2, -h / 2, w, h);
+          }
+        } catch {
+          /* Decoded source is not ready yet. */
+        }
+      }
+      ctx.restore();
+    }
+  };
+
   useEffect(() => {
+    if (!playing) {
+      renderFrame(playhead, false);
+      return;
+    }
     let frame = 0,
       previous = performance.now();
     const paint = (now: number) => {
       const state = current.current;
-      let time = state.playhead;
-      if (state.playing) {
-        const elapsed = Math.min((now - previous) / 1000, 0.12);
-        time += elapsed;
-        const end = projectDuration(state.project);
-        if (time >= end) {
-          time = end;
-          useEditorStore.setState({ playing: false });
-        }
-        useEditorStore.setState({ playhead: time });
-        current.current = { ...state, playhead: time, playing: time < end };
-      }
+      const elapsed = Math.min((now - previous) / 1000, 0.12);
       previous = now;
-      const p = state.project,
-        end = projectDuration(p);
-      // Keep the final decoded frame visible when playback reaches the project end.
-      const paintTime =
-        end > 0 ? Math.min(time, Math.max(0, end - 1 / p.fps)) : time;
-      const canvas = canvasRef.current,
-        ctx = canvas?.getContext("2d");
-      if (!canvas || !ctx) {
-        frame = requestAnimationFrame(paint);
+      let time = state.playhead + elapsed;
+      const end = projectDuration(state.project);
+      if (time >= end) {
+        time = end;
+        useEditorStore.setState({ playing: false, playhead: end });
+        current.current = { ...state, playhead: end, playing: false };
+        renderFrame(end, false);
         return;
       }
-      const factor = canvas.width / p.width;
-      ctx.setTransform(factor, 0, 0, factor, 0, 0);
-      ctx.globalAlpha = 1;
-      ctx.filter = "none";
-      ctx.fillStyle = p.background;
-      ctx.fillRect(0, 0, p.width, p.height);
-      const clips = [...p.tracks]
-        .reverse()
-        .flatMap((track) =>
-          p.clips
-            .filter((c) => c.trackId === track.id)
-            .sort((a, b) => a.start - b.start),
-        );
-      for (const clip of clips) {
-        const track = p.tracks.find((t) => t.id === clip.trackId)!;
-        const active =
-          paintTime >= clip.start && paintTime < clip.start + clip.duration;
-        const source = sources.current.get(clip.id);
-        const media = source?.element;
-        const evaluated = evaluateKeyframes(
-          clip,
-          Math.max(0, paintTime - clip.start),
-        );
-        const local = Math.max(0, paintTime - clip.start);
-        if (media instanceof HTMLMediaElement) {
-          if (!active) {
-            media.pause();
-            if (source?.gain) source.gain.gain.value = 0;
-            continue;
-          }
-          if (state.playing && !source?.gain) initializeAudio();
-          // Chromium seeks at microsecond precision. Nudge exact frame boundaries
-          // inside the intended frame instead of rounding down to its predecessor.
-          const target = clip.sourceIn + local * clip.speed + 0.000001;
-          if (
-            Number.isFinite(media.duration) &&
-            Math.abs(media.currentTime - target) >
-              (state.playing ? 0.15 : 0.00001)
-          ) {
-            try {
-              media.currentTime = Math.min(target, media.duration);
-            } catch {
-              /* Source metadata loading. */
-            }
-          }
-          media.playbackRate = clip.speed;
-          let gain =
-            track.muted || clip.muted || localMuted.current
-              ? 0
-              : evaluated.volume;
-          gain *= evaluateFade(clip, local, "audio");
-          if (source?.gain) {
-            source.gain.gain.value = gain;
-            media.volume = 1;
-          } else media.volume = Math.min(1, gain);
-          if (state.playing && media.paused) void media.play().catch(() => {});
-          if (!state.playing && !media.paused) media.pause();
-        }
-        if (!active || track.hidden || track.kind === "audio") continue;
-        const alpha =
-          evaluated.transform.opacity * evaluateFade(clip, local, "video");
-        const movement =
-          drag.current?.clip.id === clip.id ? drag.current : null;
-        const tr = movement
-          ? {
-              ...evaluated.transform,
-              x: evaluated.transform.x + movement.dx,
-              y: evaluated.transform.y + movement.dy,
-            }
-          : evaluated.transform;
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-        ctx.translate(p.width / 2 + tr.x, p.height / 2 + tr.y);
-        ctx.rotate((tr.rotation * Math.PI) / 180);
-        ctx.scale(
-          tr.scale * (tr.flipX ? -1 : 1),
-          tr.scale * (tr.flipY ? -1 : 1),
-        );
-        const a = clip.adjustments;
-        ctx.filter = a.blur > 0 ? `blur(${a.blur * factor}px)` : "none";
-        if (clip.text) {
-          const layer = textPreviewLayer(clip);
-          ctx.drawImage(
-            layer.canvas,
-            -layer.width / 2,
-            -layer.height / 2,
-            layer.width,
-            layer.height,
-          );
-        } else if (media) {
-          const asset = p.assets.find((a) => a.id === clip.assetId)!;
-          try {
-            if (!(
-              (media instanceof HTMLVideoElement && media.readyState < 2) ||
-              (media instanceof HTMLImageElement && !media.complete)
-            )) {
-              const previewScale = Math.min(
-                1,
-                1920 / asset.width,
-                1920 / asset.height,
-              );
-              const layer = imagePreviewLayer(
-                clip,
-                media as HTMLImageElement | HTMLVideoElement,
-                Math.max(1, Math.round(asset.width * previewScale)),
-                Math.max(1, Math.round(asset.height * previewScale)),
-                source?.decodedTime,
-              );
-              const contain = Math.min(
-                p.width / layer.width,
-                p.height / layer.height,
-              );
-              const w = layer.width * contain,
-                h = layer.height * contain;
-              ctx.drawImage(layer, -w / 2, -h / 2, w, h);
-            }
-          } catch {
-            /* Decoded source is not ready yet. */
-          }
-        }
-        ctx.restore();
-      }
+      useEditorStore.setState({ playhead: time });
+      current.current = { ...state, playhead: time, playing: true };
+      renderFrame(time, true);
       frame = requestAnimationFrame(paint);
     };
     frame = requestAnimationFrame(paint);
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [playing]);
+
+  useEffect(() => {
+    if (!playing) {
+      renderFrame(playhead, false);
+    }
+  }, [playing, playhead, project, size, viewScale]);
   const aspect = project.width / project.height,
     displayW = Math.min(size.w, size.h * aspect) * viewScale,
     displayH = displayW / aspect;
   return (
-    <section className="player-panel panel" aria-label="播放器">
+    <section className="player-panel panel" aria-label={t("player.title")}>
       <div className="panel-heading">
-        <span>播放器</span>
+        <span>{t("player.title")}</span>
         <span className="muted small">
           {project.width} × {project.height} · {project.fps} fps
         </span>
       </div>
       <div className="player-stage" ref={hostRef}>
-        <canvas
+        <div className="player-stage-content">
+          <div className="player-canvas-wrapper" style={{ width: displayW, height: displayH }}>
+            <canvas
           ref={canvasRef}
-          aria-label="视频预览"
+          aria-label={t("player.preview")}
           width={Math.max(
             2,
             Math.round(Math.min(1920, displayW * devicePixelRatio)),
@@ -388,6 +458,7 @@ export default function Player({
             const ratio = project.width / displayW;
             d.dx = (event.clientX - d.x) * ratio;
             d.dy = (event.clientY - d.y) * ratio;
+            renderFrame(current.current.playhead, false);
           }}
           onPointerCancel={() => {
             drag.current = null;
@@ -428,13 +499,41 @@ export default function Player({
               });
           }}
         />
+        {safeZoneMode !== "none" && (
+          <SafeZoneOverlay mode={safeZoneMode} width={displayW} height={displayH} />
+        )}
+        {selectedIds.length === 1 &&
+          (() => {
+            const clip = project.clips.find(
+              (c) =>
+                c.id === selectedIds[0] &&
+                playhead >= c.start &&
+                playhead < c.start + c.duration,
+            );
+            const trk = clip ? project.tracks.find((t) => t.id === clip.trackId) : null;
+            if (!clip || !trk || trk.locked || trk.kind === "audio") return null;
+            return (
+              <CanvasTransformGizmo
+                clip={clip}
+                project={project}
+                displayW={displayW}
+                displayH={displayH}
+                onUpdateClip={onUpdateClip}
+                renderFrame={renderFrame}
+                playhead={playhead}
+              />
+            );
+          })()}
+        </div>
+        <AudioVuMeter analyser={analyserNode} playing={playing} />
+      </div>
         {!project.clips.length && (
-          <div className="player-empty">
+          <div className="player-empty" style={{ width: displayW, maxWidth: displayW, padding: "0 14px", boxSizing: "border-box" }}>
             <div className="preview-mark">
-              R<span>✦</span>
+              <img src="./icons/gocut.png" width={Math.max(40, Math.min(68, Math.round(displayW * 0.28)))} height={Math.max(40, Math.min(68, Math.round(displayW * 0.28)))} alt="GoCut" />
             </div>
-            <p>让灵感，成为画面</p>
-            <span>导入素材并加入时间线开始创作</span>
+            <p>{t("player.emptyTitle")}</p>
+            <span>{t("player.emptyDesc")}</span>
           </div>
         )}
         {selectedIds.length === 1 &&
@@ -445,7 +544,7 @@ export default function Player({
               playhead < c.start + c.duration,
           ) && (
             <div className="player-selection-hint">
-              拖动画面调整所选片段位置
+              {t("player.dragHint")}
             </div>
           )}
         {errors.length > 0 && (
@@ -454,7 +553,7 @@ export default function Player({
             onClick={() => setErrors([])}
             title={errors.join("、")}
           >
-            素材无法预览，导出仍使用原文件 · 点击收起
+            {t("player.previewErrorDismiss")}
           </button>
         )}
       </div>
@@ -465,14 +564,14 @@ export default function Player({
         </div>
         <div className="transport">
           <button
-            title="上一帧 ←"
+            title={`${t("player.prevFrame")} ←`}
             onClick={() => onSeek(Math.max(0, playhead - 1 / project.fps))}
           >
             <SkipBack size={15} />
           </button>
           <button
             className="play-button"
-            aria-label={playing ? "暂停" : "播放"}
+            aria-label={playing ? t("player.pause") : t("player.play")}
             onClick={() => {
               initializeAudio();
               if (!playing && playhead >= duration) onSeek(0);
@@ -487,7 +586,7 @@ export default function Player({
             )}
           </button>
           <button
-            title="下一帧 →"
+            title={`${t("player.nextFrame")} →`}
             onClick={() =>
               onSeek(Math.min(duration, playhead + 1 / project.fps))
             }
@@ -496,20 +595,67 @@ export default function Player({
           </button>
         </div>
         <div className="player-tools">
+          <div className="player-safe-picker" title="Panduan Safe Zone (TikTok / Reels / 16:9)">
+            <select
+              value={safeZoneMode}
+              onChange={(e) => setSafeZoneMode(e.target.value as SafeZoneMode)}
+              aria-label="Safe Zone Guide"
+            >
+              <option value="none">Safe: Off</option>
+              <option value="tiktok">TikTok</option>
+              <option value="reels">Reels</option>
+              <option value="16:9">16:9 TV</option>
+            </select>
+          </div>
+          <div className="player-ratio-picker">
+            <select
+              aria-label="Aspect Ratio"
+              value={
+                project.width === 1080 && project.height === 1920 ? "9:16" :
+                project.width === 1920 && project.height === 1080 ? "16:9" :
+                project.width === 1080 && project.height === 1080 ? "1:1" :
+                project.width === 1440 && project.height === 1080 ? "4:3" :
+                project.width === 1080 && project.height === 1440 ? "3:4" : "custom"
+              }
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "9:16") updateProject({ width: 1080, height: 1920 });
+                else if (v === "16:9") updateProject({ width: 1920, height: 1080 });
+                else if (v === "1:1") updateProject({ width: 1080, height: 1080 });
+                else if (v === "4:3") updateProject({ width: 1440, height: 1080 });
+                else if (v === "3:4") updateProject({ width: 1080, height: 1440 });
+              }}
+            >
+              <option value="9:16">9:16</option>
+              <option value="16:9">16:9</option>
+              <option value="1:1">1:1</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+              {!(
+                (project.width === 1080 && project.height === 1920) ||
+                (project.width === 1920 && project.height === 1080) ||
+                (project.width === 1080 && project.height === 1080) ||
+                (project.width === 1440 && project.height === 1080) ||
+                (project.width === 1080 && project.height === 1440)
+              ) && (
+                <option value="custom">{project.width}:{project.height}</option>
+              )}
+            </select>
+          </div>
           <button
-            title={muted ? "开启预览声音" : "静音预览"}
+            title={muted ? t("player.unmute") : t("player.mute")}
             onClick={() => setMuted(!muted)}
           >
             {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
           </button>
           <button
-            title="预览缩放"
+            title={t("player.zoom")}
             onClick={() => setViewScale(viewScale === 1 ? 1.5 : 1)}
           >
             <ZoomIn size={16} />
           </button>
           <button
-            title="全屏预览"
+            title={t("player.fullscreen")}
             onClick={() => {
               if (document.fullscreenElement) void document.exitFullscreen();
               else void hostRef.current?.requestFullscreen();

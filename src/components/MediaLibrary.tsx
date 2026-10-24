@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   MoreHorizontal,
   Music2,
+  Palette,
   Plus,
   Play,
   Search,
@@ -19,8 +20,11 @@ import {
   X,
 } from "lucide-react";
 import type { MediaAsset, MediaKind, Project } from "../core/types";
+import { createSolidColorAsset } from "../core/model";
+import { useEditorStore } from "../editor/store";
 import { ASSET_DRAG_TYPE } from "./Timeline";
 import "./MediaLibrary.css";
+import { useTranslation } from "../i18n";
 
 export interface MediaLibraryProps {
   project: Project;
@@ -56,12 +60,15 @@ export default function MediaLibrary({
   onRevealAsset,
   onPreviewAsset,
 }: MediaLibraryProps) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<MediaKind | "all">("all");
   const [view, setView] = useState<"grid" | "list">("grid");
   const [selected, setSelected] = useState<string | null>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [draggingFiles, setDraggingFiles] = useState(false);
+  const [showColorPicker, setShowColorPicker] = useState(false);
+  const [customColor, setCustomColor] = useState("#000000");
   const dragCounter = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -80,12 +87,16 @@ export default function MediaLibrary({
   };
   const receiveFiles = (files: File[]) => {
     if (!files.length) return;
-    if (window.editorAPI) {
-      const paths = files
-        .map((file) => window.editorAPI!.getPathForFile(file))
-        .filter(Boolean);
-      if (paths.length) onImport(paths);
-    } else onImportFiles?.(files);
+    const paths = window.editorAPI
+      ? files
+          .map((file) => window.editorAPI!.getPathForFile(file))
+          .filter(Boolean)
+      : [];
+    if (paths.length) {
+      onImport(paths);
+    } else {
+      onImportFiles?.(files);
+    }
   };
   const dropFiles = (event: DragEvent) => {
     if (!event.dataTransfer.types.includes("Files")) return;
@@ -95,15 +106,26 @@ export default function MediaLibrary({
     setDraggingFiles(false);
     receiveFiles(Array.from(event.dataTransfer.files));
   };
+  const addSolid = (hex: string, name?: string) => {
+    const asset = createSolidColorAsset(hex, name ?? `Solid ${hex}`, project.width, project.height);
+    useEditorStore.getState().addAssets([asset]);
+    setShowColorPicker(false);
+  };
   const item = (asset: MediaAsset) => {
     const inTimeline = project.clips.some((c) => c.assetId === asset.id);
+    const kindLabel =
+      asset.kind === "audio"
+        ? t("media.filterAudio")
+        : asset.kind === "image"
+          ? t("media.filterImage")
+          : t("media.filterVideo");
     return (
       <div
         key={asset.id}
         data-asset-id={asset.id}
         role="button"
         tabIndex={0}
-        aria-label={`${asset.name}，${asset.kind === "audio" ? "音频" : asset.kind === "image" ? "图片" : "视频"}${asset.missing ? "，文件丢失" : ""}`}
+        aria-label={`${asset.name}，${kindLabel}${asset.missing ? `，${t("media.missing")}` : ""}`}
         aria-pressed={selected === asset.id}
         className={`media-item media-item-${asset.kind} ${selected === asset.id ? "is-selected" : ""} ${asset.missing ? "is-missing" : ""}`}
         draggable={!asset.missing}
@@ -187,19 +209,19 @@ export default function MediaLibrary({
           </span>
           <span className="media-time">
             {asset.kind === "image"
-              ? "图片"
+              ? t("media.filterImage")
               : formatMediaDuration(asset.duration)}
           </span>
           {inTimeline && (
-            <span className="media-used" title="已用于时间线">
+            <span className="media-used" title={t("media.usedInTimeline")}>
               <Check size={10} />
             </span>
           )}
-          {asset.missing && <span className="media-missing">文件丢失</span>}
+          {asset.missing && <span className="media-missing">{t("media.missing")}</span>}
           <button
             className="media-add"
-            aria-label={`添加 ${asset.name} 到时间线`}
-            title="添加到播放位置 · 双击素材"
+            aria-label={`${t("media.addToTimeline")}: ${asset.name}`}
+            title={t("media.footerHint")}
             disabled={asset.missing}
             onClick={(event) => {
               event.stopPropagation();
@@ -215,7 +237,7 @@ export default function MediaLibrary({
           </span>
           <span className="media-metadata">
             {asset.kind === "audio"
-              ? "音频"
+              ? t("media.filterAudio")
               : `${asset.width} × ${asset.height}`}{" "}
             {asset.kind === "video" && asset.fps > 0
               ? `· ${Math.round(asset.fps * 100) / 100} fps`
@@ -224,8 +246,8 @@ export default function MediaLibrary({
         </div>
         <button
           className="media-more"
-          title="素材操作"
-          aria-label={`${asset.name} 操作`}
+          title={t("media.title")}
+          aria-label={`${asset.name} ${t("media.title")}`}
           aria-expanded={menu === asset.id}
           onClick={(event) => {
             event.stopPropagation();
@@ -240,7 +262,7 @@ export default function MediaLibrary({
             className="media-context"
             onClick={(event) => event.stopPropagation()}
           >
-            {onPreviewAsset && <button onClick={() => { onPreviewAsset(asset.id);setMenu(null); }}><Play size={13} /> 预览素材</button>}
+            {onPreviewAsset && <button onClick={() => { onPreviewAsset(asset.id);setMenu(null); }}><Play size={13} /> {t("media.previewMedia")}</button>}
             <button
               disabled={asset.missing}
               onClick={() => {
@@ -248,7 +270,7 @@ export default function MediaLibrary({
                 setMenu(null);
               }}
             >
-              <Plus size={13} /> 添加到时间线
+              <Plus size={13} /> {t("media.addToTimeline")}
             </button>
             {onRevealAsset && (
               <button
@@ -258,7 +280,7 @@ export default function MediaLibrary({
                 }}
               >
                 <FolderOpen size={13} />{" "}
-                {asset.missing ? "重新链接素材" : "在文件夹中显示"}
+                {asset.missing ? t("media.relink") : t("media.revealInFolder")}
               </button>
             )}
             <button
@@ -269,7 +291,7 @@ export default function MediaLibrary({
                 if (selected === asset.id) setSelected(null);
               }}
             >
-              <Trash2 size={13} /> 从素材库移除
+              <Trash2 size={13} /> {t("media.delete")}
             </button>
           </div>
         )}
@@ -279,7 +301,7 @@ export default function MediaLibrary({
   return (
     <section
       className={`media-library ${draggingFiles ? "is-file-drop" : ""}`}
-      aria-label="本地素材库"
+      aria-label={t("media.title")}
       onDragEnter={(event) => {
         if (event.dataTransfer.types.includes("Files")) {
           event.preventDefault();
@@ -315,49 +337,121 @@ export default function MediaLibrary({
       <div className="media-top">
         <div className="media-top-title">
           <FolderOpen size={15} />
-          <span>项目素材</span>
+          <span>{t("media.projectMedia")}</span>
           <b>{project.assets.length}</b>
         </div>
-        <button
-          className="media-import"
-          onClick={startImport}
-          disabled={importing}
-        >
-          {importing ? (
-            <LoaderCircle size={13} className="media-spin" />
-          ) : (
-            <Plus size={13} />
-          )}{" "}
-          {importing ? "导入中" : "导入素材"}
-        </button>
+        <div style={{ display: "flex", gap: "6px" }}>
+          <button
+            className="media-import"
+            style={{ padding: "0 8px" }}
+            title="Create Solid Color (Color Matte)"
+            aria-label="Create Solid Color"
+            onClick={() => setShowColorPicker(!showColorPicker)}
+          >
+            <Palette size={13} />
+          </button>
+          <button
+            className="media-import"
+            onClick={startImport}
+            disabled={importing}
+          >
+            {importing ? (
+              <LoaderCircle size={13} className="media-spin" />
+            ) : (
+              <Plus size={13} />
+            )}{" "}
+            {importing ? t("media.importing") : t("media.import")}
+          </button>
+        </div>
       </div>
+      {showColorPicker && (
+        <div
+          className="media-color-popover"
+          style={{
+            position: "absolute",
+            top: "44px",
+            right: "12px",
+            background: "#222",
+            border: "1px solid #444",
+            borderRadius: "8px",
+            padding: "10px",
+            zIndex: 50,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            width: "200px",
+          }}
+        >
+          <strong style={{ fontSize: "11px", color: "#ccc" }}>Solid Color (Color Matte)</strong>
+          <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
+            {[
+              { color: "#000000", name: "Black" },
+              { color: "#ffffff", name: "White" },
+              { color: "#00ff00", name: "Green Screen" },
+              { color: "#0078d7", name: "Blue" },
+              { color: "#e11d48", name: "Red" },
+              { color: "#7c3aed", name: "Purple" },
+            ].map((p) => (
+              <button
+                key={p.color}
+                title={p.name}
+                style={{
+                  width: "24px",
+                  height: "24px",
+                  borderRadius: "4px",
+                  background: p.color,
+                  border: "1px solid #555",
+                  cursor: "pointer",
+                }}
+                onClick={() => addSolid(p.color, p.name)}
+              />
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "4px" }}>
+            <input
+              type="color"
+              value={customColor}
+              onChange={(e) => setCustomColor(e.target.value)}
+              style={{ width: "32px", height: "24px", padding: 0, border: "0", cursor: "pointer", borderRadius: "4px" }}
+            />
+            <button
+              className="media-import"
+              style={{ flex: 1, padding: "4px 8px", fontSize: "11px" }}
+              onClick={() => addSolid(customColor, `Solid ${customColor}`)}
+            >
+              Add Custom
+            </button>
+          </div>
+        </div>
+      )}
       <div className="media-tools">
         <div className="media-search">
           <Search size={13} />
           <input
-            aria-label="搜索素材"
-            placeholder="搜索素材"
+            aria-label={t("media.searchPlaceholder")}
+            placeholder={t("media.searchPlaceholder")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
           {query && (
-            <button aria-label="清空搜索" onClick={() => setQuery("")}>
+            <button aria-label={t("media.clearSearch")} onClick={() => setQuery("")}>
               <X size={12} />
             </button>
           )}
         </div>
         <div className="media-view">
           <button
-            title="网格视图"
-            aria-label="网格视图"
+            title={t("media.gridView")}
+            aria-label={t("media.gridView")}
             className={view === "grid" ? "is-active" : ""}
             onClick={() => setView("grid")}
           >
             <Grid2X2 size={14} />
           </button>
           <button
-            title="列表视图"
-            aria-label="列表视图"
+            title={t("media.listView")}
+            aria-label={t("media.listView")}
             className={view === "list" ? "is-active" : ""}
             onClick={() => setView("list")}
           >
@@ -365,7 +459,7 @@ export default function MediaLibrary({
           </button>
         </div>
       </div>
-      <div className="media-filters" role="tablist" aria-label="素材类型">
+      <div className="media-filters" role="tablist" aria-label={t("media.title")}>
         {(["all", "video", "audio", "image"] as const).map((value) => (
           <button
             role="tab"
@@ -375,12 +469,12 @@ export default function MediaLibrary({
             onClick={() => setKind(value)}
           >
             {value === "all"
-              ? "全部"
+              ? t("media.filterAll")
               : value === "video"
-                ? "视频"
+                ? t("media.filterVideo")
                 : value === "audio"
-                  ? "音频"
-                  : "图片"}
+                  ? t("media.filterAudio")
+                  : t("media.filterImage")}
             {value !== "all" && (
               <span>
                 {project.assets.filter((a) => a.kind === value).length}
@@ -403,15 +497,15 @@ export default function MediaLibrary({
         ) : project.assets.length > 0 ? (
           <div className="media-empty">
             <Search size={26} />
-            <strong>没有找到匹配素材</strong>
-            <p>试试其他关键词或素材类型</p>
+            <strong>{t("media.noMatchTitle")}</strong>
+            <p>{t("media.noMatchDesc")}</p>
             <button
               onClick={() => {
                 setQuery("");
                 setKind("all");
               }}
             >
-              查看全部素材
+              {t("media.viewAll")}
             </button>
           </div>
         ) : (
@@ -421,32 +515,30 @@ export default function MediaLibrary({
               <Music2 size={18} />
               <FileImage size={19} />
             </div>
-            <strong>把灵感放进这里</strong>
-            <p>
-              导入视频、音频和图片
-              <br />
-              或直接拖入本地文件
+            <strong>{t("media.emptyInspiration")}</strong>
+            <p style={{ whiteSpace: "pre-line" }}>
+              {t("media.emptyDesc")}
             </p>
             <button
               className="media-empty-import"
               onClick={startImport}
               disabled={importing}
             >
-              <Upload size={13} /> {importing ? "正在读取素材…" : "导入素材"}
+              <Upload size={13} /> {importing ? t("media.importing") : t("media.import")}
             </button>
-            <span>支持 MP4、MOV、MP3、PNG 等格式</span>
+            <span>{t("media.importHint")}</span>
           </div>
         )}
       </div>
       <div className="media-footer">
-        <span>{filtered.length} 个素材</span>
-        <span>双击添加 · 拖动到时间线</span>
+        <span>{filtered.length} {t("speech.assets")}</span>
+        <span>{t("media.footerHint")}</span>
       </div>
       {draggingFiles && (
         <div className="media-drop-overlay">
           <Upload size={31} />
-          <strong>松开以导入素材</strong>
-          <span>文件保留在本地，随时开始编辑</span>
+          <strong>{t("media.dropOverlayTitle")}</strong>
+          <span>{t("media.dropOverlayDesc")}</span>
         </div>
       )}
     </section>

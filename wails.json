@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "gocut",
+  "outputfilename": "gocut",
+  "frontend:dir": ".",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "http://localhost:5173",
+  "author": {
+    "name": "GoCut Contributors"
+  },
+  "info": {
+    "companyName": "GoCut",
+    "productName": "GoCut",
+    "productVersion": "0.7.0-beta",
+    "copyright": "Copyright 2026 GoCut Contributors",
+    "comments": "Fast offline desktop video editor"
+  }
+}

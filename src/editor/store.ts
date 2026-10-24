@@ -15,7 +15,8 @@ import {
   snapToFrame,
   validateProject,
 } from "../core/model";
-import { linkedIds, moveLinked, speedLinked, slipLinked, placeAsset, trimLinked, splitLinked, unlinkClips, type PlacementMode } from "../core/timelineEdits";
+import { linkedIds, moveLinked, speedLinked, slipLinked, placeAsset, trimLinked, splitLinked, unlinkClips, rippleTrim, closeGap, setClipSpeed, createCompoundClip, ungroupCompoundClip, rippleSnapTrack, rippleSnapAllTracks, type PlacementMode } from "../core/timelineEdits";
+import { applyTransition, type TransitionId } from "../core/creativePresets";
 import type { Subtitle } from "../core/subtitles";
 interface EditorState {
   project: Project;
@@ -26,7 +27,10 @@ interface EditorState {
   zoom: number;
   snapping: boolean;
   magnetic: boolean;
+  activeTool: "select" | "razor";
+  setActiveTool: (tool: "select" | "razor") => void;
   dirty: boolean;
+  revisionId: number;
   past: Project[];
   future: Project[];
   clipboard: Clip[];
@@ -38,6 +42,7 @@ interface EditorState {
   transactionRecorded: boolean;
   updateProject: (patch: Partial<Project>) => void;
   addAssets: (assets: MediaAsset[]) => void;
+  updateAsset: (assetId: string, patch: Partial<MediaAsset>) => void;
   removeAsset: (assetId: string) => void;
   addAssetClip: (assetId: string, start?: number, trackId?: string, range?: { sourceIn: number; duration: number }) => void;
   placeAsset: (assetId: string, trackId: string | undefined, range: { sourceIn: number; duration: number }, mode: PlacementMode) => void;
@@ -49,6 +54,13 @@ interface EditorState {
   moveClips: (ids: string[], delta: number, trackId?: string) => void;
   trim: (clipId: string, edge: "start" | "end", time: number) => void;
   split: () => void;
+  splitAt: (clipId: string, time: number) => void;
+  rippleTrim: (clipId: string, edge: "start" | "end", time?: number) => void;
+  closeGap: (trackId: string, atTime: number) => void;
+  setClipSpeed: (clipId: string, speed: number, ripple?: boolean) => void;
+  applyTransition: (clipId: string, transition: TransitionId, seconds?: number) => void;
+  createCompoundClip: (clipIds?: string[]) => void;
+  ungroupCompoundClip: (compoundClipId?: string) => void;
   deleteSelected: () => void;
   duplicate: () => void;
   copy: () => void;
@@ -123,6 +135,161 @@ function patchClip(
     clips: p.clips.map((c) => (c.id === clipId ? { ...c, ...rest } : c)),
   };
 }
+
+export function isProjectEqual(a: Project, b: Project): boolean {
+  if (a === b) return true;
+  if (
+    a.id !== b.id ||
+    a.name !== b.name ||
+    a.width !== b.width ||
+    a.height !== b.height ||
+    a.fps !== b.fps ||
+    a.background !== b.background ||
+    a.tracks.length !== b.tracks.length ||
+    a.clips.length !== b.clips.length ||
+    a.assets.length !== b.assets.length
+  ) {
+    return false;
+  }
+  for (let i = 0; i < a.tracks.length; i++) {
+    const tA = a.tracks[i], tB = b.tracks[i];
+    if (tA === tB) continue;
+    if (
+      tA.id !== tB.id ||
+      tA.name !== tB.name ||
+      tA.kind !== tB.kind ||
+      tA.muted !== tB.muted ||
+      tA.hidden !== tB.hidden ||
+      tA.locked !== tB.locked
+    ) return false;
+  }
+  for (let i = 0; i < a.assets.length; i++) {
+    const asA = a.assets[i], asB = b.assets[i];
+    if (asA === asB) continue;
+    if (
+      asA.id !== asB.id ||
+      asA.path !== asB.path ||
+      asA.name !== asB.name ||
+      asA.kind !== asB.kind ||
+      asA.duration !== asB.duration ||
+      asA.missing !== asB.missing
+    ) return false;
+  }
+  for (let i = 0; i < a.clips.length; i++) {
+    const cA = a.clips[i], cB = b.clips[i];
+    if (cA === cB) continue;
+    if (
+      cA.id !== cB.id ||
+      cA.linkId !== cB.linkId ||
+      cA.trackId !== cB.trackId ||
+      cA.assetId !== cB.assetId ||
+      cA.name !== cB.name ||
+      cA.start !== cB.start ||
+      cA.duration !== cB.duration ||
+      cA.sourceIn !== cB.sourceIn ||
+      cA.speed !== cB.speed ||
+      cA.volume !== cB.volume ||
+      cA.muted !== cB.muted ||
+      cA.fadeIn !== cB.fadeIn ||
+      cA.fadeOut !== cB.fadeOut ||
+      cA.audioFadeIn !== cB.audioFadeIn ||
+      cA.audioFadeOut !== cB.audioFadeOut
+    ) return false;
+    if (cA.transform !== cB.transform) {
+      const tA = cA.transform, tB = cB.transform;
+      if (
+        tA.x !== tB.x ||
+        tA.y !== tB.y ||
+        tA.scale !== tB.scale ||
+        tA.rotation !== tB.rotation ||
+        tA.opacity !== tB.opacity ||
+        tA.flipX !== tB.flipX ||
+        tA.flipY !== tB.flipY
+      ) return false;
+    }
+    if (cA.adjustments !== cB.adjustments) {
+      const adA = cA.adjustments, adB = cB.adjustments;
+      if (
+        adA.brightness !== adB.brightness ||
+        adA.contrast !== adB.contrast ||
+        adA.saturation !== adB.saturation ||
+        adA.temperature !== adB.temperature ||
+        adA.blur !== adB.blur
+      ) return false;
+    }
+    if (cA.keyframes !== cB.keyframes) {
+      if (cA.keyframes.length !== cB.keyframes.length) return false;
+      for (let k = 0; k < cA.keyframes.length; k++) {
+        const kA = cA.keyframes[k], kB = cB.keyframes[k];
+        if (
+          kA.id !== kB.id ||
+          kA.time !== kB.time ||
+          kA.value !== kB.value ||
+          kA.property !== kB.property ||
+          kA.easing !== kB.easing
+        ) return false;
+      }
+    }
+    if (cA.text !== cB.text) {
+      if (!cA.text || !cB.text) return false;
+      if (
+        cA.text.text !== cB.text.text ||
+        cA.text.fontSize !== cB.text.fontSize ||
+        cA.text.color !== cB.text.color ||
+        cA.text.fontFamily !== cB.text.fontFamily ||
+        cA.text.align !== cB.text.align
+      ) return false;
+    }
+    if (cA.videoFadeWindow !== cB.videoFadeWindow) {
+      if (!cA.videoFadeWindow || !cB.videoFadeWindow) return false;
+      if (
+        cA.videoFadeWindow.offset !== cB.videoFadeWindow.offset ||
+        cA.videoFadeWindow.duration !== cB.videoFadeWindow.duration ||
+        cA.videoFadeWindow.fadeIn !== cB.videoFadeWindow.fadeIn ||
+        cA.videoFadeWindow.fadeOut !== cB.videoFadeWindow.fadeOut
+      ) return false;
+    }
+    if (cA.audioFadeWindow !== cB.audioFadeWindow) {
+      if (!cA.audioFadeWindow || !cB.audioFadeWindow) return false;
+      if (
+        cA.audioFadeWindow.offset !== cB.audioFadeWindow.offset ||
+        cA.audioFadeWindow.duration !== cB.audioFadeWindow.duration ||
+        cA.audioFadeWindow.fadeIn !== cB.audioFadeWindow.fadeIn ||
+        cA.audioFadeWindow.fadeOut !== cB.audioFadeWindow.fadeOut
+      ) return false;
+    }
+    if (cA.crop !== cB.crop) {
+      if (!cA.crop || !cB.crop) return false;
+      if (
+        cA.crop.x !== cB.crop.x ||
+        cA.crop.y !== cB.crop.y ||
+        cA.crop.width !== cB.crop.width ||
+        cA.crop.height !== cB.crop.height
+      ) return false;
+    }
+    if (cA.chromaKey !== cB.chromaKey) {
+      if (!cA.chromaKey || !cB.chromaKey) return false;
+      if (
+        cA.chromaKey.enabled !== cB.chromaKey.enabled ||
+        cA.chromaKey.color !== cB.chromaKey.color ||
+        cA.chromaKey.similarity !== cB.chromaKey.similarity ||
+        cA.chromaKey.blend !== cB.chromaKey.blend
+      ) return false;
+    }
+    if (cA.mask !== cB.mask) {
+      if (!cA.mask || !cB.mask) return false;
+      if (
+        cA.mask.shape !== cB.mask.shape ||
+        cA.mask.width !== cB.mask.width ||
+        cA.mask.height !== cB.mask.height ||
+        cA.mask.feather !== cB.mask.feather ||
+        cA.mask.invert !== cB.mask.invert
+      ) return false;
+    }
+  }
+  return true;
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   project: createProject(),
   selectedIds: [],
@@ -131,7 +298,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   zoom: 60,
   snapping: true,
   magnetic: false,
+  activeTool: "select",
+  setActiveTool: (tool) => set({ activeTool: tool }),
   dirty: false,
+  revisionId: 0,
   past: [],
   future: [],
   clipboard: [],
@@ -151,6 +321,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       playhead: 0,
       playing: false,
       dirty: false,
+      revisionId: get().revisionId + 1,
       past: [],
       future: [],
       clipboard: [],
@@ -159,18 +330,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }),
   commit: (project) => {
     const s = get();
-    if (
-      project === s.project ||
-      JSON.stringify(project) === JSON.stringify(s.project)
-    )
-      return;
+    if (isProjectEqual(project, s.project)) return;
     set({
       project: { ...clone(project), updatedAt: new Date().toISOString() },
       dirty: true,
+      revisionId: s.revisionId + 1,
       past:
         s.transactionOpen && s.transactionRecorded
           ? s.past
-          : [...s.past, clone(s.project)].slice(-150),
+          : [...s.past, clone(s.project)].slice(-50),
       future: [],
       transactionRecorded: s.transactionOpen,
     });
@@ -188,10 +356,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     });
     if (fresh.length) get().commit({ ...p, assets: [...p.assets, ...fresh] });
   },
+  updateAsset: (assetId, patch) => {
+    const p = get().project;
+    const assets = p.assets.map((a) => (a.id === assetId ? { ...a, ...patch } : a));
+    set({ project: { ...p, assets } });
+  },
   removeAsset: (assetId) => {
     const p = get().project;
     if (p.clips.some((c) => c.assetId === assetId))
-      throw new Error("素材仍被时间线使用，请先删除对应片段");
+      throw new Error("Asset is still in use by timeline clips. Please delete them first. (素材仍被时间线使用，请先删除对应片段)");
     get().commit({ ...p, assets: p.assets.filter((a) => a.id !== assetId) });
   },
   addAssetClip: (assetId, start, trackId, range) => {
@@ -201,7 +374,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (range && (asset.missing || !Number.isFinite(range.sourceIn) || !Number.isFinite(range.duration) ||
         range.sourceIn < 0 || range.duration < 1 / p.fps - 1e-9 || range.duration > 86400 ||
         (asset.kind === "image" ? range.sourceIn !== 0 : range.sourceIn + range.duration > asset.duration + 1e-9)))
-      throw new Error("素材选段无效或超出源素材范围");
+      throw new Error("Source range is invalid or exceeds asset duration. (素材选段无效或超出源素材范围)");
     let track: Track | undefined;
     if (trackId !== undefined) {
       track = p.tracks.find(
@@ -213,12 +386,51 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       track = createTrack(asset.kind);
       p = { ...p, tracks: [...p.tracks, track] };
     }
-    const end = p.clips
-        .filter((c) => c.trackId === track!.id)
-        .reduce((end, c) => Math.max(end, c.start + c.duration), 0),
-      clip = createClip(asset, track.id, start ?? end, p.fps);
+    const trackClips = p.clips
+      .filter((c) => c.trackId === track!.id)
+      .sort((a, b) => a.start - b.start);
+    const end = trackClips.reduce((maxEnd, c) => Math.max(maxEnd, c.start + c.duration), 0);
+
+    let clipStart: number;
+    if (get().magnetic) {
+      if (trackClips.length === 0) {
+        clipStart = 0;
+      } else if (start === undefined || start >= end - 0.05) {
+        clipStart = end;
+      } else if (start <= 0.05) {
+        clipStart = 0;
+      } else {
+        const seamClip = trackClips.find(c => start >= c.start && start <= c.start + c.duration);
+        if (seamClip) {
+          const distToStart = Math.abs(start - seamClip.start);
+          const distToEnd = Math.abs(start - (seamClip.start + seamClip.duration));
+          clipStart = distToStart < distToEnd ? seamClip.start : seamClip.start + seamClip.duration;
+        } else {
+          clipStart = start;
+        }
+      }
+    } else {
+      clipStart = start ?? end;
+    }
+
+    const clip = createClip(asset, track.id, clipStart, p.fps);
     if (range) { clip.sourceIn = range.sourceIn; clip.duration = range.duration; }
-    get().commit({ ...p, clips: [...p.clips, clip] });
+
+    let nextClips = [...p.clips, clip];
+    if (get().magnetic && trackClips.length > 0 && clipStart < end) {
+      nextClips = nextClips.map(c => {
+        if (c.id !== clip.id && c.trackId === track!.id && c.start >= clipStart - 1e-4) {
+          return { ...c, start: c.start + clip.duration };
+        }
+        return c;
+      });
+    }
+
+    let nextProject = { ...p, clips: nextClips };
+    if (get().magnetic) {
+      nextProject = rippleSnapTrack(nextProject, track.id);
+    }
+    get().commit(nextProject);
     set({ selectedIds: [clip.id], playhead: clip.start });
   },
   placeAsset: (assetId, trackId, range, mode) => {
@@ -245,7 +457,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   addSubtitles: (cues) => {
     const p = get().project,
-      track = createTrack("text", "字幕");
+      track = createTrack("text", "Subtitles");
     const clips = cues
       .filter(
         (c) =>
@@ -279,9 +491,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     for (const clipId of get().selectedIds) p = patchClip(p, clipId, patch);
     get().commit(p);
   },
-  moveClips: (ids, delta, trackId) => get().commit(moveLinked(get().project, ids, delta, trackId)),
-  trim: (clipId, edge, time) =>
-    get().commit(trimLinked(get().project, clipId, edge, time)),
+  moveClips: (ids, delta, trackId) => {
+    let next = moveLinked(get().project, ids, delta, trackId);
+    if (get().magnetic) {
+      next = rippleSnapAllTracks(next);
+    }
+    get().commit(next);
+  },
+  trim: (clipId, edge, time) => {
+    if (get().magnetic) {
+      get().rippleTrim(clipId, edge, time);
+    } else {
+      get().commit(trimLinked(get().project, clipId, edge, time));
+    }
+  },
   split: () => {
     let p = get().project;
     const ids = get().selectedIds.length
@@ -294,6 +517,49 @@ export const useEditorStore = create<EditorState>((set, get) => ({
           .map((c) => c.id);
     p = splitLinked(p, ids, get().playhead);
     get().commit(p);
+  },
+  splitAt: (clipId, time) => {
+    let p = get().project;
+    p = splitLinked(p, [clipId], time);
+    get().commit(p);
+  },
+  rippleTrim: (clipId, edge, time) => {
+    const p = get().project;
+    const t = time ?? get().playhead;
+    const next = rippleTrim(p, clipId, edge, t);
+    get().commit(next);
+  },
+  closeGap: (trackId, atTime) => {
+    const next = closeGap(get().project, trackId, atTime);
+    get().commit(next);
+  },
+  setClipSpeed: (clipId, speed, ripple) => {
+    const isRipple = ripple !== undefined ? ripple : get().magnetic;
+    const next = setClipSpeed(get().project, clipId, speed, isRipple);
+    get().commit(next);
+  },
+  applyTransition: (clipId, transition, seconds = 0.5) => {
+    const next = applyTransition(get().project, clipId, transition, seconds);
+    get().commit(next.project);
+  },
+  createCompoundClip: (clipIds) => {
+    const ids = clipIds && clipIds.length ? clipIds : get().selectedIds;
+    if (!ids.length) return;
+    const next = createCompoundClip(get().project, ids);
+    get().commit(next);
+    const compound = next.clips.find(
+      (c) => c.isCompound && !get().project.clips.some((old) => old.id === c.id),
+    );
+    if (compound) {
+      set({ selectedIds: [compound.id] });
+    }
+  },
+  ungroupCompoundClip: (compoundClipId) => {
+    const targetId = compoundClipId ?? get().selectedIds[0];
+    if (!targetId) return;
+    const next = ungroupCompoundClip(get().project, targetId);
+    get().commit(next);
+    set({ selectedIds: [] });
   },
   deleteSelected: () => {
     const s = get(),
@@ -333,7 +599,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         const delta = c.start - p.clips.find(original => original.id === c.id)!.start;
         const previous = offsets.get(c.linkId);
         if (previous !== undefined && Math.abs(previous - delta) > 1e-8)
-          throw new Error("磁性删除会使后续画声错位，请关闭磁性删除或先解除关联");
+          throw new Error("Ripple delete would desynchronize linked audio. Disable ripple delete or unlink clips first. (磁性删除会使后续画声错位)");
         offsets.set(c.linkId, delta);
       }
     }
@@ -401,7 +667,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const p = get().project,
       track = createTrack(
         kind,
-        `${{ video: "视频", image: "画面", audio: "音频", text: "文字" }[kind]} ${p.tracks.filter((t) => t.kind === kind).length + 1}`,
+        `${{ video: "Video", image: "Video", audio: "Audio", text: "Text" }[kind]} ${p.tracks.filter((t) => t.kind === kind).length + 1}`,
       );
     get().commit({
       ...p,

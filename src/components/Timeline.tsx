@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   Film,
+  Layers,
   LockKeyhole,
   Link2,
   Magnet,
@@ -34,15 +35,18 @@ import {
   ZoomOut,
 } from "lucide-react";
 import type { Clip, Project, Track, TrackKind } from "../core/types";
-import { linkedIds, trimLinked } from "../core/timelineEdits";
+import { linkedIds, trimLinked, rippleSnapAllTracks } from "../core/timelineEdits";
 import { snapToFrame } from "../core/model";
 import "./Timeline.css";
+import TimelineContextMenu, { type ContextMenuItem } from "./TimelineContextMenu";
+import { useTranslation, type TranslationKey } from "../i18n";
+import { useEditorStore } from "../editor/store";
 
 export interface TimelineProps {
   project: Project;
   selectedIds: string[];
-  playhead: number;
-  playing: boolean;
+  playhead?: number;
+  playing?: boolean;
   zoom: number;
   onSeek: (time: number) => void;
   onSelect: (ids: string[]) => void;
@@ -69,7 +73,7 @@ export interface TimelineProps {
   canRedo?: boolean;
 }
 
-const GUTTER = 158;
+const GUTTER = 170;
 const ROW = 70;
 const RULER = 30;
 export const ASSET_DRAG_TYPE = "application/x-reacut-asset";
@@ -94,6 +98,50 @@ export function snapTimelineTime(
   }
   return nearest;
 }
+
+export function calculateZoomScroll(
+  playhead: number,
+  oldPps: number,
+  newPps: number,
+  scrollLeft: number,
+  viewportWidth: number,
+): number {
+  const playheadPxOld = playhead * oldPps;
+  const visualOffset = playheadPxOld - scrollLeft;
+  if (visualOffset >= 0 && visualOffset <= viewportWidth) {
+    return Math.max(0, playhead * newPps - visualOffset);
+  }
+  return Math.max(0, playhead * newPps - viewportWidth / 2);
+}
+
+export function formatTrackName(name: string, kind: string, t: (key: TranslationKey) => string): string {
+  if (
+    name === "文字" ||
+    name === "字幕" ||
+    name === "Text" ||
+    name === "Teks" ||
+    name === "Metin" ||
+    name === "Subtitle" ||
+    name === "Trek Subtitle"
+  ) {
+    return t("timeline.textTrack");
+  }
+  const videoMatch = name.match(/^(?:画面|视频|Video|Trek Video)\s*(\d+)$/i);
+  if (videoMatch) {
+    return `${t("timeline.videoTrack")} ${videoMatch[1]}`;
+  }
+  if (name === "画面" || name === "视频" || name === "Video") {
+    return t("timeline.videoTrack");
+  }
+  const audioMatch = name.match(/^(?:音频|Audio|Trek Audio)\s*(\d+)$/i);
+  if (audioMatch) {
+    return `${t("timeline.audioTrack")} ${audioMatch[1]}`;
+  }
+  if (name === "音频" || name === "Audio" || name === "分离音频" || name === "Extracted Audio") {
+    return t("timeline.audioTrack");
+  }
+  return name;
+}
 export function formatRulerTime(seconds: number, fractional = false) {
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds - minutes * 60;
@@ -110,10 +158,21 @@ export function rulerInterval(pixelsPerSecond: number) {
 export function layoutTrackClips(clips: Clip[]) {
   const ends: number[] = [];
   const lanes = new Map<string, number>();
-  for (const clip of [...clips].sort((a, b) => a.start - b.start)) {
+  const sorted = [...clips].sort((a, b) => a.start - b.start);
+  for (let i = 0; i < sorted.length; i++) {
+    const clip = sorted[i];
+    const prev = sorted[i - 1];
+    // Adjacent clips with transition overlap share the same lane (non-stacking, CapCut style)
+    const isTransitionOverlap = prev && (
+      (clip.fadeIn > 0 || prev.fadeOut > 0 || clip.videoFadeWindow || prev.videoFadeWindow) &&
+      clip.start >= prev.start + prev.duration - Math.max(prev.fadeOut, clip.fadeIn, 2.5) - 0.05
+    );
     let lane = ends.findIndex((end) => end <= clip.start + 0.00001);
+    if (lane < 0 && isTransitionOverlap && ends.length > 0) {
+      lane = lanes.get(prev.id) ?? 0;
+    }
     if (lane < 0) lane = ends.length;
-    ends[lane] = clip.start + clip.duration;
+    ends[lane] = Math.max(ends[lane] ?? 0, clip.start + clip.duration);
     lanes.set(clip.id, lane);
   }
   return {
@@ -177,7 +236,23 @@ type Gesture =
   | { kind: "marquee"; x: number; y: number; width: number; height: number };
 
 export default function Timeline(props: TimelineProps) {
-  const { project, selectedIds, playhead, zoom, onSeek, onSelect } = props;
+  const { t } = useTranslation();
+  const storePlayhead = useEditorStore((s) => s.playhead);
+  const storePlaying = useEditorStore((s) => s.playing);
+  const storeActiveTool = useEditorStore((s) => s.activeTool);
+  const setActiveTool = useEditorStore((s) => s.setActiveTool);
+  const splitAt = useEditorStore((s) => s.splitAt);
+  const storeCloseGap = useEditorStore((s) => s.closeGap);
+  const activeTool = storeActiveTool ?? "select";
+  const [selectedGap, setSelectedGap] = useState<{ trackId: string; start: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
+  const playhead = props.playhead ?? storePlayhead;
+  const playing = props.playing ?? storePlaying;
+  const { project, selectedIds, zoom, onSeek, onSelect } = props;
   const scrollRef = useRef<HTMLDivElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
@@ -190,6 +265,7 @@ export default function Timeline(props: TimelineProps) {
   const pointerCleanupRef = useRef<(() => void) | null>(null);
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [snapLine, setSnapLine] = useState<number | null>(null);
+  const [selectedTransition, setSelectedTransition] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     trackId: string;
     time: number;
@@ -203,6 +279,7 @@ export default function Timeline(props: TimelineProps) {
   const [deleteTrackId, setDeleteTrackId] = useState<string | null>(null);
   const [trackMenu, setTrackMenu] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(800);
+  const [draggedKind, setDraggedKind] = useState<TrackKind | null>(null);
   const [localSnap, setLocalSnap] = useState(true);
   const [localMagnetic, setLocalMagnetic] = useState(false);
   const snapping = props.snapping ?? localSnap;
@@ -249,12 +326,92 @@ export default function Timeline(props: TimelineProps) {
     if (gesture?.kind === "trim") return trimPreview.clips.find(c => c.id === clip.id) ?? clip;
     return clip;
   };
+  // Dynamic tracks: Hide empty placeholder tracks unless they have clips, are targeted, or matching media is dragged
+  const primaryVideoTrack = project.tracks.find((t) => t.kind === "video") ?? project.tracks[0];
+  const visibleTracks = project.tracks.filter((track) => {
+    if (track.id === primaryVideoTrack?.id) return true;
+    if (project.clips.some((c) => c.trackId === track.id)) return true;
+    if (dropTarget?.trackId === track.id) return true;
+    if (trackActions?.id === track.id) return true;
+    if (gesture?.kind === "move" && gesture.targetTrackId === track.id) return true;
+    if (draggedKind && (track.kind === draggedKind || (draggedKind === "image" && track.kind === "video"))) return true;
+    return false;
+  });
+
+
+  const moveClipVertically = (clip: Clip, direction: "up" | "down") => {
+    const p = useEditorStore.getState().project;
+    const currentIdx = p.tracks.findIndex((t) => t.id === clip.trackId);
+    if (currentIdx < 0) return;
+    const currentTrack = p.tracks[currentIdx];
+
+    if (direction === "up") {
+      const upperTrack = p.tracks.slice(0, currentIdx).reverse().find((t) => t.kind === currentTrack.kind && !t.locked);
+      if (upperTrack) {
+        props.onMoveClips([clip.id], 0, upperTrack.id);
+      } else {
+        const newTrack = {
+          id: "track-" + Math.random().toString(36).substring(2, 9),
+          name: `Video ${p.tracks.filter(t => t.kind === "video").length + 1}`,
+          kind: currentTrack.kind,
+          muted: false,
+          hidden: false,
+          locked: false,
+        };
+        const tracks = [...p.tracks];
+        tracks.splice(currentIdx, 0, newTrack);
+        const clips = p.clips.map((c) => c.id === clip.id ? { ...c, trackId: newTrack.id } : c);
+        useEditorStore.getState().commit({ ...p, tracks, clips });
+      }
+    } else {
+      const lowerTrack = p.tracks.slice(currentIdx + 1).find((t) => t.kind === currentTrack.kind && !t.locked);
+      if (lowerTrack) {
+        props.onMoveClips([clip.id], 0, lowerTrack.id);
+      } else {
+        const newTrack = {
+          id: "track-" + Math.random().toString(36).substring(2, 9),
+          name: `Video ${p.tracks.filter(t => t.kind === "video").length + 1}`,
+          kind: currentTrack.kind,
+          muted: false,
+          hidden: false,
+          locked: false,
+        };
+        const tracks = [...p.tracks];
+        tracks.splice(currentIdx + 1, 0, newTrack);
+        const clips = p.clips.map((c) => c.id === clip.id ? { ...c, trackId: newTrack.id } : c);
+        useEditorStore.getState().commit({ ...p, tracks, clips });
+      }
+    }
+  };
+
+  const moveClipToNewTrack = (clip: Clip) => {
+    const p = useEditorStore.getState().project;
+    const currentIdx = p.tracks.findIndex((t) => t.id === clip.trackId);
+    if (currentIdx < 0) return;
+    const currentTrack = p.tracks[currentIdx];
+    const newTrack = {
+      id: "track-" + Math.random().toString(36).substring(2, 9),
+      name: `Video ${p.tracks.filter(t => t.kind === "video").length + 1}`,
+      kind: currentTrack.kind,
+      muted: false,
+      hidden: false,
+      locked: false,
+    };
+    const tracks = [...p.tracks];
+    tracks.splice(currentIdx, 0, newTrack);
+    const clips = p.clips.map((c) => c.id === clip.id ? { ...c, trackId: newTrack.id } : c);
+    useEditorStore.getState().commit({ ...p, tracks, clips });
+  };
+
   const clips = project.clips.map(displayClip);
   let trackTop = 0;
-  const trackLayouts = project.tracks.map((track) => {
+  const trackLayouts = visibleTracks.map((track) => {
     const live = layoutTrackClips(clips.filter((c) => c.trackId === track.id));
+    const isAffectedByMove =
+      gesture?.kind === "move" &&
+      (track.id === gesture.targetTrackId || track.id === gesture.trackId);
     const frozen =
-      gesture && gesture.kind !== "marquee"
+      gesture && gesture.kind !== "marquee" && !isAffectedByMove
         ? frozenLayoutsRef.current?.find((layout) => layout.id === track.id)
         : undefined;
     const layout = frozen
@@ -368,6 +525,21 @@ export default function Timeline(props: TimelineProps) {
   }, [deleteTrackId]);
   useEffect(() => () => pointerCleanupRef.current?.(), []);
   useEffect(() => {
+    if (!selectedGap) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (["INPUT", "TEXTAREA"].includes((e.target as HTMLElement)?.tagName)) return;
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        storeCloseGap(selectedGap.trackId, selectedGap.start + 0.01);
+        setSelectedGap(null);
+      } else if (e.key === "Escape") {
+        setSelectedGap(null);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [selectedGap, storeCloseGap]);
+  useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const observer = new ResizeObserver(() => setViewportWidth(el.clientWidth));
@@ -413,7 +585,7 @@ export default function Timeline(props: TimelineProps) {
     const index = trackLayouts.findIndex(
       (layout) => y < layout.top + layout.height,
     );
-    return project.tracks[index < 0 ? project.tracks.length - 1 : index];
+    return visibleTracks[index < 0 ? visibleTracks.length - 1 : index];
   };
   const snap = (time: number, excluded: string[], offset = 0) => {
     const candidates = [
@@ -429,22 +601,60 @@ export default function Timeline(props: TimelineProps) {
     setSnapLine(Math.abs(value - time) > 0.0001 ? value + offset : null);
     return value;
   };
+  const snapPlayhead = (rawTime: number) => {
+    if (!snapping) return rawTime;
+    const candidates = [
+      0,
+      ...project.clips.flatMap((c) => [c.start, c.start + c.duration]),
+    ];
+    return snapTimelineTime(rawTime, candidates, 10 / pps);
+  };
+  const getTrackGaps = (trackId: string) => {
+    const trackClips = project.clips.filter((c) => c.trackId === trackId).sort((a, b) => a.start - b.start);
+    const gaps: { start: number; duration: number }[] = [];
+    if (!trackClips.length) return gaps;
+    if (trackClips[0].start > 0.05) {
+      gaps.push({ start: 0, duration: trackClips[0].start });
+    }
+    for (let i = 0; i < trackClips.length - 1; i++) {
+      const end1 = trackClips[i].start + trackClips[i].duration;
+      const start2 = trackClips[i + 1].start;
+      if (start2 - end1 > 0.05) {
+        gaps.push({ start: end1, duration: start2 - end1 });
+      }
+    }
+    return gaps;
+  };
+  const handleZoomWithPlayheadCenter = (newPpsRaw: number) => {
+    const el = scrollRef.current;
+    const clampedNewPps = Math.max(5, Math.min(400, newPpsRaw));
+    if (el) {
+      const vWidth = el.clientWidth - GUTTER;
+      const newScroll = calculateZoomScroll(playhead, pps, clampedNewPps, el.scrollLeft, vWidth);
+      props.onZoom(clampedNewPps);
+      requestAnimationFrame(() => {
+        if (scrollRef.current) {
+          scrollRef.current.scrollLeft = newScroll;
+        }
+      });
+    } else {
+      props.onZoom(clampedNewPps);
+    }
+  };
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     const wheel = (event: WheelEvent) => {
       if (event.ctrlKey || event.metaKey) {
         event.preventDefault();
-        props.onZoom(
-          Math.max(5, Math.min(400, pps * (event.deltaY < 0 ? 1.12 : 0.89))),
-        );
+        handleZoomWithPlayheadCenter(pps * (event.deltaY < 0 ? 1.15 : 0.87));
       }
     };
     el.addEventListener("wheel", wheel, { passive: false });
     return () => el.removeEventListener("wheel", wheel);
-  }, [pps, props.onZoom]);
+  }, [pps, playhead, props.onZoom]);
   useEffect(() => {
-    if (!props.playing || gestureRef.current) return;
+    if (!playing || gestureRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
     const x = playhead * pps;
@@ -464,6 +674,13 @@ export default function Timeline(props: TimelineProps) {
     (event.currentTarget as HTMLElement).focus({ preventScroll: true });
     const track = project.tracks.find((t) => t.id === clip.trackId);
     if (track?.locked) return;
+    if (activeTool === "razor" && !trim) {
+      const clickTime = locate(event.clientX, event.clientY).x / pps;
+      if (clickTime > clip.start && clickTime < clip.start + clip.duration) {
+        splitAt(clip.id, clickTime);
+        return;
+      }
+    }
     const additive = event.metaKey || event.ctrlKey || event.shiftKey;
     const groupIds = linkedIds(project, [clip.id]);
     const ids = selectedIds.includes(clip.id)
@@ -572,17 +789,25 @@ export default function Timeline(props: TimelineProps) {
   const scrub = (event: ReactPointerEvent) => {
     if (event.button !== 0) return;
     event.stopPropagation();
-    onSeek(Math.max(0, locate(event.clientX, event.clientY).x / pps));
-    const move = (e: PointerEvent) =>
-      onSeek(Math.max(0, locate(e.clientX, e.clientY).x / pps));
+    const raw = Math.max(0, locate(event.clientX, event.clientY).x / pps);
+    onSeek(snapPlayhead(raw));
+    const move = (e: PointerEvent) => {
+      const t = Math.max(0, locate(e.clientX, e.clientY).x / pps);
+      onSeek(snapPlayhead(t));
+    };
     const finish = () => {};
     listenForGesture(move, finish);
   };
   const startSelection = (event: ReactPointerEvent) => {
     if (event.button !== 0) return;
+    setSelectedGap(null);
     const start = locate(event.clientX, event.clientY);
     const additive = event.shiftKey || event.metaKey || event.ctrlKey;
     const previous = additive ? selectedIds : [];
+    if (!additive) {
+      onSeek(Math.max(0, start.x / pps));
+      onSelect([]);
+    }
     let moved = false;
     const move = (e: PointerEvent) => {
       const current = locate(e.clientX, e.clientY);
@@ -596,7 +821,7 @@ export default function Timeline(props: TimelineProps) {
       setActiveGesture({ kind: "marquee", x, y, width, height });
       const found = project.clips
         .filter((c) => {
-          const row = project.tracks.findIndex((t) => t.id === c.trackId);
+          const row = visibleTracks.findIndex((t) => t.id === c.trackId);
           return (
             !project.tracks[row]?.locked &&
             c.start * pps < x + width &&
@@ -632,6 +857,88 @@ export default function Timeline(props: TimelineProps) {
   const onDrop = (event: React.DragEvent, track: Track) => {
     event.preventDefault();
     setDropTarget(null);
+    const isTransitionDrag =
+      event.dataTransfer.types.includes("application/x-reacut-transition") ||
+      event.dataTransfer.types.includes("application/x-gocut-transition");
+
+    if (isTransitionDrag && track.kind === "video" && !track.locked) {
+      const transitionId = (event.dataTransfer.getData("application/x-gocut-transition") ||
+        event.dataTransfer.getData("application/x-reacut-transition")) as any;
+      const durationRaw = event.dataTransfer.getData("application/x-transition-duration");
+      const duration = durationRaw ? parseFloat(durationRaw) : 0.5;
+      const dropTime = Math.max(0, locate(event.clientX, event.clientY).x / pps);
+
+      const trackClips = project.clips
+        .filter((c) => c.trackId === track.id)
+        .sort((a, b) => a.start - b.start);
+
+      if (trackClips.length === 0) return;
+
+      let frontTarget: Clip | undefined;
+      const hitClip = trackClips.find(
+        (c) => dropTime >= c.start - 0.2 && dropTime <= c.start + c.duration + 0.2,
+      );
+
+      if (hitClip) {
+        const hitIndex = trackClips.findIndex((c) => c.id === hitClip.id);
+        const prev = trackClips[hitIndex - 1];
+        const next = trackClips[hitIndex + 1];
+
+        if (prev && (!next || dropTime - hitClip.start < (hitClip.start + hitClip.duration) - dropTime)) {
+          frontTarget = prev;
+        } else if (next) {
+          frontTarget = hitClip;
+        } else if (prev) {
+          frontTarget = prev;
+        } else {
+          frontTarget = hitClip;
+        }
+      } else {
+        let minSeamDist = Infinity;
+        for (let i = 0; i < trackClips.length - 1; i++) {
+          const c1 = trackClips[i];
+          const c2 = trackClips[i + 1];
+          const seamTime = (c1.start + c1.duration + c2.start) / 2;
+          const dist = Math.abs(dropTime - seamTime);
+          if (dist < minSeamDist) {
+            minSeamDist = dist;
+            frontTarget = c1;
+          }
+        }
+      }
+
+      if (frontTarget) {
+        const fIdx = trackClips.findIndex((c) => c.id === frontTarget!.id);
+        const nClip = trackClips[fIdx + 1];
+
+        if (nClip) {
+          const fEnd = frontTarget.start + frontTarget.duration;
+          if (nClip.start > fEnd + 0.001) {
+            const gap = nClip.start - fEnd;
+            const updatedClips = project.clips.map((c) => {
+              if (c.trackId === track.id && c.start >= nClip.start - 1e-4) {
+                return { ...c, start: Math.max(0, c.start - gap) };
+              }
+              return c;
+            });
+            useEditorStore.getState().commit({ ...project, clips: updatedClips });
+          }
+          try {
+            useEditorStore.getState().applyTransition(frontTarget.id, transitionId, duration);
+          } catch (err) {
+            console.warn("Could not apply transition between clips:", err);
+          }
+        } else {
+          const isIntro = dropTime <= frontTarget.start + frontTarget.duration / 2;
+          if (isIntro) {
+            useEditorStore.getState().updateClip(frontTarget.id, { fadeIn: Math.min(duration, frontTarget.duration / 2) });
+          } else {
+            useEditorStore.getState().updateClip(frontTarget.id, { fadeOut: Math.min(duration, frontTarget.duration / 2) });
+          }
+        }
+      }
+      return;
+    }
     const id =
       event.dataTransfer.getData(ASSET_DRAG_TYPE) ||
       event.dataTransfer.getData("assetid");
@@ -642,21 +949,58 @@ export default function Timeline(props: TimelineProps) {
       !track.locked &&
       (asset.kind === track.kind ||
         (asset.kind === "image" && track.kind === "video"))
-    )
+    ) {
+      const rawDropTime = Math.max(0, locate(event.clientX, event.clientY).x / pps);
+      let targetTime = rawDropTime;
+      if (magnetic) {
+        const trackClips = project.clips.filter((c) => c.trackId === track.id).sort((a, b) => a.start - b.start);
+        if (trackClips.length === 0) {
+          targetTime = 0;
+        } else {
+          const lastEnd = trackClips.reduce((maxEnd, c) => Math.max(maxEnd, c.start + c.duration), 0);
+          if (rawDropTime >= lastEnd - 0.2) {
+            targetTime = lastEnd;
+          } else if (rawDropTime <= 0.2) {
+            targetTime = 0;
+          }
+        }
+      }
       props.onDropAsset?.(
         id,
-        snapToFrame(
-          Math.max(0, locate(event.clientX, event.clientY).x / pps),
-          project.fps,
-        ),
+        snapToFrame(targetTime, project.fps),
         track.id,
       );
+    }
   };
+
+  const onDropNewTrack = (event: React.DragEvent) => {
+    event.preventDefault();
+    setDropTarget(null);
+    const id =
+      event.dataTransfer.getData(ASSET_DRAG_TYPE) ||
+      event.dataTransfer.getData("assetid");
+    const asset = project.assets.find((a) => a.id === id);
+    if (!asset || asset.missing) return;
+    const kind = asset.kind === "image" ? "video" : asset.kind;
+    if (kind !== "video") return;
+    useEditorStore.getState().addTrack("video");
+    const updatedProject = useEditorStore.getState().project;
+    const newTrack = updatedProject.tracks.find((t) => t.kind === "video")!;
+    props.onDropAsset?.(
+      id,
+      snapToFrame(
+        Math.max(0, locate(event.clientX, event.clientY).x / pps),
+        project.fps,
+      ),
+      newTrack.id,
+    );
+  };
+
 
   return (
     <section
-      className="tl"
-      aria-label="多轨时间线"
+      className={`tl ${activeTool === "razor" ? "is-razor-tool" : ""}`}
+      aria-label={t("timeline.title")}
       style={
         {
           "--tl-row": `${ROW}px`,
@@ -667,32 +1011,41 @@ export default function Timeline(props: TimelineProps) {
       <div className="tl-toolbar">
         <div className="tl-toolbar-group">
           <button
-            title="撤销 · ⌘Z"
-            aria-label="撤销"
+            title={`${t("toolbar.undo")} · ⌘Z`}
+            aria-label={t("toolbar.undo")}
             onClick={props.onUndo}
             disabled={!props.canUndo}
           >
             <Undo2 size={17} />
           </button>
           <button
-            title="重做 · ⇧⌘Z"
-            aria-label="重做"
+            title={`${t("toolbar.redo")} · ⇧⌘Z`}
+            aria-label={t("toolbar.redo")}
             onClick={props.onRedo}
             disabled={!props.canRedo}
           >
             <Redo2 size={17} />
           </button>
           <span className="tl-divider" />
-          <span
-            className="tl-tool-indicator"
-            title="选择工具 · 拖动空白区域可框选"
-            aria-label="选择工具"
+          <button
+            className={activeTool === "select" ? "is-active" : ""}
+            title={`${t("timeline.selectTool")} · V`}
+            aria-label={`${t("timeline.selectTool")} · V`}
+            onClick={() => setActiveTool("select")}
           >
             <MousePointer2 size={16} />
-          </span>
+          </button>
           <button
-            title="在播放位置分割 · ⌘B"
-            aria-label="分割片段"
+            className={activeTool === "razor" ? "is-active" : ""}
+            title="Razor Tool (剪刀工具) · C"
+            aria-label="Razor Tool · C"
+            onClick={() => setActiveTool(activeTool === "razor" ? "select" : "razor")}
+          >
+            <Scissors size={16} />
+          </button>
+          <button
+            title={`${t("toolbar.split")} · ⌘B`}
+            aria-label={t("toolbar.split")}
             onClick={props.onSplit}
             disabled={
               !project.clips.some(
@@ -707,16 +1060,16 @@ export default function Timeline(props: TimelineProps) {
             <Scissors size={17} />
           </button>
           <button
-            title="复制选中片段"
-            aria-label="复制选中片段"
+            title={t("shortcuts.duplicate")}
+            aria-label={t("shortcuts.duplicate")}
             onClick={props.onDuplicate}
             disabled={!selectedUnlocked || !props.onDuplicate}
           >
             <Copy size={16} />
           </button>
           <button
-            title="删除选中片段 · Backspace"
-            aria-label="删除选中片段"
+            title={`${t("toolbar.delete")} · Backspace`}
+            aria-label={t("toolbar.delete")}
             onClick={props.onDelete}
             disabled={!selectedUnlocked}
           >
@@ -727,22 +1080,27 @@ export default function Timeline(props: TimelineProps) {
             className={magnetic ? "is-active" : ""}
             title={
               magnetic
-                ? "关闭磁性删除（删除后收拢间隙）"
-                : "打开磁性删除（删除后收拢间隙）"
+                ? t("timeline.magneticDeleteOn")
+                : t("timeline.magneticDeleteOff")
             }
-            aria-label="磁性删除"
+            aria-label={t("timeline.magneticDelete")}
             aria-pressed={magnetic}
             onClick={() => {
-              setLocalMagnetic(!magnetic);
-              props.onMagneticChange?.(!magnetic);
+              const next = !magnetic;
+              setLocalMagnetic(next);
+              props.onMagneticChange?.(next);
+              if (next) {
+                const snapped = rippleSnapAllTracks(project);
+                useEditorStore.getState().commit(snapped);
+              }
             }}
           >
             <Magnet size={17} />
           </button>
           <button
             className={snapping ? "is-active" : ""}
-            title={snapping ? "关闭时间线吸附" : "打开时间线吸附"}
-            aria-label="时间线吸附"
+            title={snapping ? t("timeline.snappingOn") : t("timeline.snappingOff")}
+            aria-label={t("toolbar.snapping")}
             aria-pressed={snapping}
             onClick={() => {
               setLocalSnap(!snapping);
@@ -761,30 +1119,30 @@ export default function Timeline(props: TimelineProps) {
             )}
           </span>
           <button
-            title="缩小时间线"
-            aria-label="缩小时间线"
-            onClick={() => props.onZoom(Math.max(5, pps / 1.25))}
+            title={t("toolbar.zoomOut")}
+            aria-label={t("toolbar.zoomOut")}
+            onClick={() => handleZoomWithPlayheadCenter(pps / 1.25)}
           >
             <ZoomOut size={16} />
           </button>
           <input
-            aria-label="时间线缩放"
+            aria-label={t("shortcuts.zoomInOut")}
             type="range"
             min="5"
             max="400"
             value={pps}
-            onChange={(e) => props.onZoom(Number(e.target.value))}
+            onChange={(e) => handleZoomWithPlayheadCenter(Number(e.target.value))}
           />
           <button
-            title="放大时间线"
-            aria-label="放大时间线"
-            onClick={() => props.onZoom(Math.min(400, pps * 1.25))}
+            title={t("toolbar.zoomIn")}
+            aria-label={t("toolbar.zoomIn")}
+            onClick={() => handleZoomWithPlayheadCenter(pps * 1.25)}
           >
             <ZoomIn size={16} />
           </button>
           <button
             className="tl-fit"
-            title="适配整个项目"
+            title={t("timeline.fit")}
             onClick={() => {
               const width =
                 (scrollRef.current?.clientWidth ?? 900) - GUTTER - 60;
@@ -804,11 +1162,21 @@ export default function Timeline(props: TimelineProps) {
               if (scrollRef.current) scrollRef.current.scrollLeft = 0;
             }}
           >
-            适配
+            {t("timeline.fit")}
           </button>
         </div>
       </div>
-      <div className="tl-scroll" ref={scrollRef}>
+      <div
+        className="tl-scroll"
+        ref={scrollRef}
+        onWheel={(e) => {
+          if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+            handleZoomWithPlayheadCenter(pps * factor);
+          }
+        }}
+      >
         <div
           className="tl-content"
           style={{
@@ -816,10 +1184,24 @@ export default function Timeline(props: TimelineProps) {
             minWidth: "100%",
             minHeight: "100%",
           }}
+          onDragOver={(e) => {
+            const kind = (["audio", "video", "image", "text"] as const).find((k) =>
+              e.dataTransfer.types.includes(`application/x-reacut-kind-${k}`)
+            );
+            if (kind && kind !== draggedKind) {
+              setDraggedKind(kind);
+            }
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setDraggedKind(null);
+            }
+          }}
+          onDropCapture={() => setDraggedKind(null)}
         >
           <div className="tl-ruler" style={{ height: RULER }}>
             <div className="tl-ruler-label">
-              时间线 <span>{project.fps} FPS</span>
+              {t("timeline.main")} <span>{project.fps} FPS</span>
             </div>
             <div
               className="tl-ruler-body"
@@ -840,7 +1222,7 @@ export default function Timeline(props: TimelineProps) {
                   className="tl-playhead-handle"
                   role="slider"
                   tabIndex={0}
-                  aria-label="播放位置"
+                  aria-label={t("timeline.main")}
                   aria-valuenow={playhead}
                   aria-valuemin={0}
                   aria-valuemax={duration}
@@ -877,7 +1259,42 @@ export default function Timeline(props: TimelineProps) {
               </div>
             </div>
           </div>
-          {project.tracks.map((track, index) => (
+          <div
+            className={`tl-new-track-dropzone ${dropTarget?.trackId === "new-video-track" ? "is-active" : ""}`}
+            onDragOver={(event) => {
+              if (event.dataTransfer.types.includes("application/x-reacut-transition") || event.dataTransfer.types.includes("application/x-gocut-transition")) return;
+              const id =
+                event.dataTransfer.types.includes(ASSET_DRAG_TYPE) ||
+                event.dataTransfer.types.includes("assetid");
+              const sourceKind = (["audio", "video", "image"] as const).find((kind) =>
+                event.dataTransfer.types.includes(`application/x-reacut-kind-${kind}`)
+              );
+              if (id && sourceKind !== "audio") {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+                setDropTarget({
+                  trackId: "new-video-track",
+                  time: Math.max(0, locate(event.clientX, event.clientY).x / pps),
+                });
+              }
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+                if (dropTarget?.trackId === "new-video-track") {
+                  setDropTarget(null);
+                }
+              }
+            }}
+            onDrop={onDropNewTrack}
+          >
+            {dropTarget?.trackId === "new-video-track" && (
+              <div className="tl-new-track-hint">
+                <Plus size={14} />
+                <span>+ New Overlay Video Track</span>
+              </div>
+            )}
+          </div>
+          {visibleTracks.map((track, index) => (
             <div
               className={`tl-track tl-track-${track.kind} ${track.locked ? "is-locked" : ""} ${dropTarget?.trackId === track.id ? "is-drop-target" : ""}`}
               key={track.id}
@@ -890,7 +1307,7 @@ export default function Timeline(props: TimelineProps) {
                   {renamingId === track.id ? (
                     <input
                       className="tl-track-name-input"
-                      aria-label="轨道名称"
+                      aria-label={t("timeline.renameTrack")}
                       autoFocus
                       defaultValue={track.name}
                       maxLength={256}
@@ -915,22 +1332,22 @@ export default function Timeline(props: TimelineProps) {
                     />
                   ) : (
                     <span
-                      title={`${track.name}${track.locked ? "" : " · 双击重命名"}`}
+                      title={`${formatTrackName(track.name, track.kind, t)}${track.locked ? "" : ` · ${t("timeline.trackRenameHint")}`}`}
                       onDoubleClick={() => beginRename(track)}
                     >
-                      {track.name}
+                      {formatTrackName(track.name, track.kind, t)}
                     </span>
                   )}
                   <span className="tl-track-number">
                     {trackLayouts[index].count > 1
-                      ? `${trackLayouts[index].count} 层`
+                      ? `${trackLayouts[index].count} ${t("timeline.layers")}`
                       : index + 1}
                   </span>
                 </div>
                 <div className="tl-track-controls">
                   <button
-                    title={track.locked ? "解锁轨道" : "锁定轨道"}
-                    aria-label={`${track.locked ? "解锁" : "锁定"}${track.name}`}
+                    title={track.locked ? t("timeline.unlock") : t("timeline.lock")}
+                    aria-label={`${track.locked ? t("timeline.unlock") : t("timeline.lock")}: ${track.name}`}
                     className={track.locked ? "is-active" : ""}
                     onClick={() =>
                       props.onTrackUpdate(track.id, { locked: !track.locked })
@@ -943,8 +1360,8 @@ export default function Timeline(props: TimelineProps) {
                     )}
                   </button>
                   <button
-                    title={track.hidden ? "显示轨道" : "隐藏轨道"}
-                    aria-label={`${track.hidden ? "显示" : "隐藏"}${track.name}`}
+                    title={track.hidden ? t("timeline.show") : t("timeline.hide")}
+                    aria-label={`${track.hidden ? t("timeline.show") : t("timeline.hide")}: ${track.name}`}
                     className={track.hidden ? "is-active" : ""}
                     onClick={() =>
                       props.onTrackUpdate(track.id, { hidden: !track.hidden })
@@ -954,8 +1371,8 @@ export default function Timeline(props: TimelineProps) {
                   </button>
                   {track.kind !== "text" && (
                     <button
-                      title={track.muted ? "取消静音" : "静音轨道"}
-                      aria-label={`${track.muted ? "取消静音" : "静音"}${track.name}`}
+                      title={track.muted ? t("timeline.unmute") : t("timeline.mute")}
+                      aria-label={`${track.muted ? t("timeline.unmute") : t("timeline.mute")}: ${track.name}`}
                       className={track.muted ? "is-active" : ""}
                       onClick={() =>
                         props.onTrackUpdate(track.id, { muted: !track.muted })
@@ -969,9 +1386,25 @@ export default function Timeline(props: TimelineProps) {
                     </button>
                   )}
                   <button
+                    title={t("timeline.moveTrackUp")}
+                    aria-label={`${t("timeline.moveTrackUp")}: ${track.name}`}
+                    disabled={index <= 0 || track.locked || visibleTracks[index - 1]?.locked}
+                    onClick={() => props.onTrackMove?.(track.id, "up")}
+                  >
+                    <ArrowUp size={13} />
+                  </button>
+                  <button
+                    title={t("timeline.moveTrackDown")}
+                    aria-label={`${t("timeline.moveTrackDown")}: ${track.name}`}
+                    disabled={index >= visibleTracks.length - 1 || track.locked || visibleTracks[index + 1]?.locked}
+                    onClick={() => props.onTrackMove?.(track.id, "down")}
+                  >
+                    <ArrowDown size={13} />
+                  </button>
+                  <button
                     className="tl-track-more"
-                    title="轨道操作"
-                    aria-label={`${track.name}轨道操作`}
+                    title={t("timeline.trackActions")}
+                    aria-label={`${track.name} ${t("timeline.trackActions")}`}
                     aria-expanded={trackActions?.id === track.id}
                     onClick={(event) => {
                       const rect = event.currentTarget.getBoundingClientRect();
@@ -1003,7 +1436,51 @@ export default function Timeline(props: TimelineProps) {
                   backgroundSize: `${interval * pps}px 100%`,
                 }}
                 onPointerDown={startSelection}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  const clickTime = locate(e.clientX, e.clientY).x / pps;
+                  const items: ContextMenuItem[] = [
+                    {
+                      label: t("shortcuts.paste") || "Paste",
+                      icon: <Copy size={14} />,
+                      shortcut: "⌘V",
+                      disabled: track.locked,
+                      onClick: () => {
+                        onSeek(clickTime);
+                        useEditorStore.getState().paste();
+                      },
+                    },
+                    {
+                      label: t("timeline.closeGap") || "Close Gap Here",
+                      disabled: track.locked,
+                      onClick: () => {
+                        storeCloseGap(track.id, clickTime);
+                      },
+                    },
+                    { divider: true, label: "", onClick: () => {} },
+                    {
+                      label: t("timeline.selectTool") || "Select Tool",
+                      icon: <MousePointer2 size={14} />,
+                      shortcut: "V",
+                      onClick: () => setActiveTool("select"),
+                    },
+                    {
+                      label: "Razor Tool",
+                      icon: <Scissors size={14} />,
+                      shortcut: "C",
+                      onClick: () => setActiveTool("razor"),
+                    },
+                  ];
+                  setContextMenu({ x: e.clientX, y: e.clientY, items });
+                }}
                 onDragOver={(event) => {
+                  if (event.dataTransfer.types.includes("application/x-reacut-transition") || event.dataTransfer.types.includes("application/x-gocut-transition")) {
+                    if (track.kind === "video" && !track.locked) {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
+                    }
+                    return;
+                  }
                   const id =
                     event.dataTransfer.types.includes(ASSET_DRAG_TYPE) ||
                     event.dataTransfer.types.includes("assetid");
@@ -1042,6 +1519,68 @@ export default function Timeline(props: TimelineProps) {
                 }}
                 onDrop={(event) => onDrop(event, track)}
               >
+                
+                {/* CapCut-style Transition Seam Badges (Non-stacking) */}
+                {clips
+                  .filter((c) => c.trackId === track.id)
+                  .map((clip, ci, trackClips) => {
+                    const prev = trackClips[ci - 1];
+                    const hasTransition =
+                      prev &&
+                      (clip.fadeIn > 0 || prev.fadeOut > 0) &&
+                      clip.start <= prev.start + prev.duration + 0.01 &&
+                      clip.start >= prev.start + prev.duration - 4;
+                    if (!hasTransition) return null;
+                    const transitionWidth = Math.max(26, Math.min(80, (prev.start + prev.duration - clip.start) * pps));
+                    const seamTime = prev.start + prev.duration;
+                    const transitionLeft = seamTime * pps - transitionWidth / 2;
+                    const isSelected = selectedTransition === clip.id;
+                    return (
+                      <div
+                        key={`trans-${prev.id}-${clip.id}`}
+                        className={`tl-transition-block ${isSelected ? "is-selected" : ""}`}
+                        style={{
+                          left: transitionLeft,
+                          width: transitionWidth,
+                          top: 8 + (trackLayouts[index].lanes.get(clip.id) ?? 0) * 62,
+                          height: 54,
+                        }}
+                        title={`Transisi: ${(prev.start + prev.duration - clip.start).toFixed(2)}s · Klik untuk memilih, Tekan Del untuk menghapus`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedTransition(clip.id);
+                          onSelect([clip.id]);
+                        }}
+                      >
+                        <div className="tl-transition-center-seam" />
+                        <span className="tl-transition-bowtie" aria-hidden="true">
+                          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                            <polygon points="1,2 8,8 1,14" />
+                            <polygon points="15,2 8,8 15,14" />
+                          </svg>
+                        </span>
+                      </div>
+                    );
+                  })}
+
+                {getTrackGaps(track.id).map((gap, gi) => {
+                  const isSelected = selectedGap?.trackId === track.id && Math.abs(selectedGap.start - gap.start) < 0.01;
+                  return (
+                    <div
+                      key={`gap-${gi}`}
+                      className={`tl-gap ${isSelected ? "is-selected" : ""}`}
+                      style={{
+                        left: gap.start * pps,
+                        width: gap.duration * pps,
+                      }}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        setSelectedGap({ trackId: track.id, start: gap.start });
+                        onSelect([]);
+                      }}
+                    />
+                  );
+                })}
                 {clips
                   .filter((c) => c.trackId === track.id)
                   .map((clip) => {
@@ -1058,7 +1597,103 @@ export default function Timeline(props: TimelineProps) {
                       <div
                         key={clip.id}
                         data-clip-id={clip.id}
-                        className={`tl-clip tl-clip-${track.kind} ${selected ? "is-selected" : ""} ${dragging ? "is-dragging" : ""} ${track.hidden ? "is-hidden" : ""} ${asset?.missing ? "is-missing" : ""}`}
+                        className={`tl-clip tl-clip-${track.kind} ${selected ? "is-selected" : ""} ${dragging ? "is-dragging" : ""} ${track.hidden ? "is-hidden" : ""} ${asset?.missing ? "is-missing" : ""} ${clip.isCompound ? "tl-clip-compound" : ""}`}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          onSelect([clip.id]);
+                          const items: ContextMenuItem[] = [
+                            {
+                              label: t("toolbar.split") || "Split",
+                              icon: <Scissors size={14} />,
+                              shortcut: "⌘B",
+                              disabled: track.locked,
+                              onClick: () => {
+                                const clickTime = locate(e.clientX, e.clientY).x / pps;
+                                splitAt(clip.id, clickTime);
+                              },
+                            },
+                            {
+                              label: t("shortcuts.copy") || "Copy",
+                              icon: <Copy size={14} />,
+                              shortcut: "⌘C",
+                              onClick: () => useEditorStore.getState().copy(),
+                            },
+                            {
+                              label: t("shortcuts.duplicate") || "Duplicate",
+                              icon: <Copy size={14} />,
+                              shortcut: "⌘D",
+                              disabled: track.locked,
+                              onClick: () => useEditorStore.getState().duplicate(),
+                            },
+                            { divider: true, label: "", onClick: () => {} },
+                            {
+                              label: "Pindah ke Trek Video Atas",
+                              icon: <ArrowUp size={14} />,
+                              disabled: track.locked,
+                              onClick: () => moveClipVertically(clip, "up"),
+                            },
+                            {
+                              label: "Pindah ke Trek Video Bawah",
+                              icon: <ArrowDown size={14} />,
+                              disabled: track.locked,
+                              onClick: () => moveClipVertically(clip, "down"),
+                            },
+                            {
+                              label: "Pisahkan ke Trek Overlay Baru",
+                              icon: <Layers size={14} />,
+                              disabled: track.locked,
+                              onClick: () => moveClipToNewTrack(clip),
+                            },
+                            { divider: true, label: "", onClick: () => {} },
+                            {
+                              label: clip.muted ? (t("timeline.unmute") || "Unmute") : (t("timeline.mute") || "Mute"),
+                              icon: clip.muted ? <Volume2 size={14} /> : <VolumeX size={14} />,
+                              disabled: track.locked,
+                              onClick: () => props.onClipUpdate(clip.id, { muted: !clip.muted }),
+                            },
+                            {
+                              label: t("toolbar.rippleDelete") || "Ripple Delete",
+                              shortcut: "Del",
+                              danger: true,
+                              disabled: track.locked,
+                              onClick: () => {
+                                const p = useEditorStore.getState().project;
+                                const dur = clip.duration;
+                                const nextClips = p.clips
+                                  .filter((c) => c.id !== clip.id)
+                                  .map((c) => c.trackId === clip.trackId && c.start > clip.start ? { ...c, start: c.start - dur } : c);
+                                useEditorStore.getState().commit({ ...p, clips: nextClips });
+                              },
+                            },
+                            {
+                              label: t("toolbar.delete") || "Delete",
+                              icon: <Trash2 size={14} />,
+                              shortcut: "Backspace",
+                              danger: true,
+                              disabled: track.locked,
+                              onClick: () => props.onDelete(),
+                            },
+                            { divider: true, label: "", onClick: () => {} },
+                            clip.isCompound
+                              ? {
+                                  label: t("timeline.ungroupCompound") || "Ungroup Compound Clip",
+                                  icon: <Layers size={14} />,
+                                  disabled: track.locked,
+                                  onClick: () => useEditorStore.getState().ungroupCompoundClip(clip.id),
+                                }
+                              : {
+                                  label: t("timeline.createCompound") || "Create Compound Clip",
+                                  icon: <Layers size={14} />,
+                                  disabled: track.locked,
+                                  onClick: () => {
+                                    const ids = selectedIds.includes(clip.id) ? selectedIds : [clip.id];
+                                    useEditorStore.getState().createCompoundClip(ids);
+                                  },
+                                },
+                          ];
+                          setContextMenu({ x: e.clientX, y: e.clientY, items });
+                        }}
                         style={{
                           left: clip.start * pps,
                           width: Math.max(4, clip.duration * pps),
@@ -1068,10 +1703,10 @@ export default function Timeline(props: TimelineProps) {
                         }}
                         onPointerDown={(event) => startClip(event, original)}
                         onDoubleClick={() => onSeek(clip.start)}
-                        title={`${clip.name}\n${formatTimelineTime(clip.start, project.fps)} · ${clip.duration.toFixed(2)} 秒${track.locked ? "\n轨道已锁定" : ""}`}
+                        title={`${clip.name}\n${formatTimelineTime(clip.start, project.fps)} · ${clip.duration.toFixed(2)}s${track.locked ? `\n${t("timeline.trackLocked")}` : ""}`}
                         tabIndex={0}
                         role="button"
-                        aria-label={`${clip.name}，${clip.duration.toFixed(1)} 秒`}
+                        aria-label={`${clip.name}, ${clip.duration.toFixed(1)}s`}
                         aria-pressed={selected}
                         aria-disabled={track.locked}
                         aria-keyshortcuts="Enter Alt+ArrowLeft Alt+ArrowRight"
@@ -1123,8 +1758,9 @@ export default function Timeline(props: TimelineProps) {
                           ) : (
                             <Film size={12} />
                           )}
-                          {clip.linkId && <Link2 size={12} aria-label="画声关联" />}
+                          {clip.linkId && <Link2 size={12} aria-label={t("timeline.linkVideoAudio")} />}
                           <span>{clip.name}</span>
+                          {clip.isCompound && <span className="tl-compound-badge">Compound</span>}
                           {clip.speed !== 1 && <b>{clip.speed}×</b>}
                           {(clip.muted || track.muted) && <VolumeX size={12} />}
                         </div>
@@ -1184,10 +1820,10 @@ export default function Timeline(props: TimelineProps) {
                           <>
                             <div
                               className="tl-trim tl-trim-start"
-                              title="拖动裁剪入点 · 左右键逐帧调整"
+                              title={t("timeline.trimInHint")}
                               role="slider"
                               tabIndex={selected ? 0 : -1}
-                              aria-label={`${clip.name} 入点`}
+                              aria-label={`${clip.name} ${t("timeline.inPoint")}`}
                               aria-valuenow={clip.start}
                               aria-valuetext={formatTimelineTime(
                                 clip.start,
@@ -1220,10 +1856,10 @@ export default function Timeline(props: TimelineProps) {
                             />
                             <div
                               className="tl-trim tl-trim-end"
-                              title="拖动裁剪出点 · 左右键逐帧调整"
+                              title={t("timeline.trimOutHint")}
                               role="slider"
                               tabIndex={selected ? 0 : -1}
-                              aria-label={`${clip.name} 出点`}
+                              aria-label={`${clip.name} ${t("timeline.outPoint")}`}
                               aria-valuenow={clip.start + clip.duration}
                               aria-valuetext={formatTimelineTime(
                                 clip.start + clip.duration,
@@ -1262,12 +1898,12 @@ export default function Timeline(props: TimelineProps) {
                     className="tl-drop-marker"
                     style={{ left: dropTarget.time * pps }}
                   >
-                    <Plus size={12} /> 添加素材
+                    <Plus size={12} /> {t("timeline.addMedia")}
                   </div>
                 )}
                 {track.locked && (
                   <span className="tl-lock-overlay">
-                    <LockKeyhole size={12} /> 轨道已锁定
+                    <LockKeyhole size={12} /> {t("timeline.trackLocked")}
                   </span>
                 )}
               </div>
@@ -1279,7 +1915,7 @@ export default function Timeline(props: TimelineProps) {
                 onClick={() => setTrackMenu(!trackMenu)}
                 aria-expanded={trackMenu}
               >
-                <Plus size={13} /> 添加轨道 <ChevronDown size={11} />
+                <Plus size={13} /> {t("timeline.addTrack")} <ChevronDown size={11} />
               </button>
               {trackMenu && (
                 <div className="tl-popup">
@@ -1292,11 +1928,7 @@ export default function Timeline(props: TimelineProps) {
                       }}
                     >
                       <TrackIcon kind={kind} />
-                      {kind === "video"
-                        ? "视频轨道"
-                        : kind === "audio"
-                          ? "音频轨道"
-                          : "文字轨道"}
+                      {kind === "video" ? t("timeline.videoTrack") : kind === "audio" ? t("timeline.audioTrack") : t("timeline.textTrack")}
                     </button>
                   ))}
                 </div>
@@ -1304,7 +1936,7 @@ export default function Timeline(props: TimelineProps) {
             </div>
             {project.clips.length === 0 && (
               <span className="tl-empty-hint">
-                <Film size={16} /> 从素材库拖入视频、图片或音频，开始创作
+                <Film size={16} /> {t("timeline.empty")}
               </span>
             )}
           </div>
@@ -1316,6 +1948,7 @@ export default function Timeline(props: TimelineProps) {
               height: Math.max(tracksHeight, ROW),
             }}
           >
+            <div className="tl-playhead-hitbox" onPointerDown={scrub} />
             <i />
           </div>
           {snapLine !== null && (
@@ -1346,7 +1979,7 @@ export default function Timeline(props: TimelineProps) {
           ref={actionsMenuRef}
           className="tl-track-action-menu"
           role="menu"
-          aria-label={`${actionTrack.name}轨道操作菜单`}
+          aria-label={`${actionTrack.name} ${t("timeline.trackActionsMenu")}`}
           style={{ left: trackActions.x, top: trackActions.y }}
           onKeyDown={(event) => {
             if (
@@ -1392,7 +2025,7 @@ export default function Timeline(props: TimelineProps) {
             onClick={() => beginRename(actionTrack)}
           >
             <Pencil size={12} />
-            重命名轨道
+            {t("timeline.renameTrack")}
           </button>
           <button
             role="menuitem"
@@ -1408,7 +2041,7 @@ export default function Timeline(props: TimelineProps) {
             }}
           >
             <ArrowUp size={12} />
-            向上移动轨道
+            {t("timeline.moveTrackUp")}
           </button>
           <button
             role="menuitem"
@@ -1424,7 +2057,7 @@ export default function Timeline(props: TimelineProps) {
             }}
           >
             <ArrowDown size={12} />
-            向下移动轨道
+            {t("timeline.moveTrackDown")}
           </button>
           <div className="tl-menu-divider" />
           <button
@@ -1434,7 +2067,7 @@ export default function Timeline(props: TimelineProps) {
             onClick={() => requestTrackDelete(actionTrack)}
           >
             <Trash2 size={12} />
-            删除轨道
+            {t("timeline.deleteTrack")}
           </button>
         </div>
       )}
@@ -1451,16 +2084,13 @@ export default function Timeline(props: TimelineProps) {
             className="tl-confirm"
             role="dialog"
             aria-modal="true"
-            aria-label="删除轨道确认"
+            aria-label={t("timeline.deleteTrackConfirmAria")}
           >
-            <h3>删除「{deletionTrack.name}」？</h3>
-            <p>
-              这条轨道上的 {deletionCount}{" "}
-              个片段也会被删除。素材库中的原素材会保留，可通过撤销恢复轨道和片段。
-            </p>
+            <h3>{t("timeline.deleteTrackConfirmTitle", { name: deletionTrack.name })}</h3>
+            <p>{t("timeline.deleteTrackConfirmDesc", { count: deletionCount })}</p>
             <footer>
               <button autoFocus onClick={() => setDeleteTrackId(null)}>
-                取消
+                {t("dialog.cancel")}
               </button>
               <button
                 className="is-danger"
@@ -1470,7 +2100,7 @@ export default function Timeline(props: TimelineProps) {
                   setDeleteTrackId(null);
                 }}
               >
-                删除轨道和片段
+                {t("timeline.deleteTrackAndClips")}
               </button>
             </footer>
           </section>
@@ -1479,18 +2109,26 @@ export default function Timeline(props: TimelineProps) {
       <div className="tl-status">
         <span>
           {gesture?.kind === "move"
-            ? `移动 ${gesture.ids.length} 个片段 · ${gesture.delta > 0 ? "+" : ""}${gesture.delta.toFixed(2)}s`
+            ? t("timeline.movingClips", { count: gesture.ids.length, delta: (gesture.delta > 0 ? "+" : "") + gesture.delta.toFixed(2) })
             : gesture?.kind === "trim"
-              ? `裁剪${gesture.edge === "start" ? "入点" : "出点"} · ${formatTimelineTime(gesture.time, project.fps)}`
+              ? t("timeline.trimmingClip", { edge: gesture.edge === "start" ? t("timeline.inPoint") : t("timeline.outPoint"), time: formatTimelineTime(gesture.time, project.fps) })
               : selectedIds.length
-                ? `已选择 ${selectedIds.length} 个片段`
-                : "拖动移动/裁剪 · ⇧ 多选 · ⌥←/→ 逐帧微移"}
+                ? t("timeline.clipsSelected", { count: selectedIds.length })
+                : t("timeline.statusHint")}
         </span>
         <span>
-          {project.tracks.length} 条轨道 <i>·</i> {project.clips.length} 个片段{" "}
-          <i>·</i> {snapping ? "吸附开启" : "吸附关闭"}
+          {t("timeline.tracksAndClips", { tracks: project.tracks.length, clips: project.clips.length })}{" "}
+          <i>·</i> {snapping ? t("timeline.snappingActive") : t("timeline.snappingInactive")}
         </span>
       </div>
+      {contextMenu && (
+        <TimelineContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </section>
   );
 }

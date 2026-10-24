@@ -22,10 +22,11 @@ import { evaluateKeyframes, formatTime, id } from "../core/model";
 import VisualTools from "./VisualTools";
 import "./Inspector.css";
 import { useEditorStore } from "../editor/store";
+import { useTranslation } from "../i18n";
 interface Props {
   project: Project;
   clip?: Clip;
-  playhead: number;
+  playhead?: number;
   onUpdate: (patch: Partial<Clip>) => void;
   onProjectUpdate: (patch: Partial<Project>) => void;
 }
@@ -56,7 +57,7 @@ function NumberField({
       {range && (
         <input
           className="property-range"
-          aria-label={`${label}滑块`}
+          aria-label={label}
           type="range"
           min={min}
           max={max}
@@ -92,7 +93,7 @@ function NumberField({
       {diamond && (
         <button
           className="diamond-btn"
-          title={`添加 ${label} 关键帧`}
+          title={label}
           onClick={(e) => {
             e.preventDefault();
             diamond();
@@ -144,13 +145,11 @@ function Slider({
     </div>
   );
 }
-export default function Inspector({
-  project,
-  clip,
-  playhead,
-  onUpdate,
-  onProjectUpdate,
-}: Props) {
+export default function Inspector(props: Props) {
+  const { t } = useTranslation();
+  const storePlayhead = useEditorStore((s) => s.playhead);
+  const playhead = props.playhead ?? storePlayhead;
+  const { project, clip, onUpdate, onProjectUpdate } = props;
   const [tab, setTab] = useState("画面"),
     [fonts, setFonts] = useState<string[]>([
       "Noto Sans SC",
@@ -178,24 +177,24 @@ export default function Inspector({
     return (
       <aside className="inspector panel">
         <div className="panel-heading">
-          <span>项目参数</span>
+          <span>{t("inspector.projectSettings")}</span>
           <SlidersHorizontal size={16} />
         </div>
         <div className="inspector-content">
-          <h3>画布设置</h3>
+          <h3>{t("inspector.canvasSettings")}</h3>
           <label className="stacked-label">
-            项目名称
+            {t("inspector.projectName")}
             <input
-              value={project.name}
+              value={project.name === "未命名项目" || project.name === "Untitled Project" ? t("project.untitled") : project.name}
               onFocus={() => useEditorStore.getState().beginTransaction()}
               onBlur={() => useEditorStore.getState().endTransaction()}
               onChange={(e) => onProjectUpdate({ name: e.target.value })}
             />
           </label>
           <label className="property-row">
-            <span>画面比例</span>
+            <span>{t("inspector.aspectRatio")}</span>
             <select
-              aria-label="画面比例"
+              aria-label={t("inspector.aspectRatio")}
               value={`${project.width}:${project.height}`}
               onChange={(e) => {
                 const [width, height] = e.target.value.split(":").map(Number);
@@ -211,19 +210,19 @@ export default function Inspector({
                 "3840:2160",
               ].includes(`${project.width}:${project.height}`) && (
                 <option value={`${project.width}:${project.height}`}>
-                  自定义
+                  {t("inspector.aspectCustom")}
                 </option>
               )}
-              <option value="1920:1080">16:9 · 横屏</option>
-              <option value="1080:1920">9:16 · 竖屏</option>
-              <option value="1080:1080">1:1 · 方形</option>
-              <option value="1440:1080">4:3 · 经典</option>
+              <option value="1920:1080">{t("inspector.aspectLandscape")}</option>
+              <option value="1080:1920">{t("inspector.aspectPortrait")}</option>
+              <option value="1080:1080">{t("inspector.aspectSquare")}</option>
+              <option value="1440:1080">{t("inspector.aspectClassic")}</option>
               <option value="2560:1440">16:9 · 2K</option>
               <option value="3840:2160">16:9 · 4K</option>
             </select>
           </label>
           <NumberField
-            label="宽度"
+            label={t("inspector.width")}
             value={project.width}
             min={16}
             max={7680}
@@ -232,7 +231,7 @@ export default function Inspector({
             onChange={(width) => onProjectUpdate({ width })}
           />
           <NumberField
-            label="高度"
+            label={t("inspector.height")}
             value={project.height}
             min={16}
             max={7680}
@@ -241,9 +240,9 @@ export default function Inspector({
             onChange={(height) => onProjectUpdate({ height })}
           />
           <label className="property-row">
-            <span>帧率</span>
+            <span>{t("inspector.fps")}</span>
             <select
-              aria-label="帧率"
+              aria-label={t("inspector.fps")}
               value={project.fps}
               onChange={(e) => onProjectUpdate({ fps: Number(e.target.value) })}
             >
@@ -255,9 +254,9 @@ export default function Inspector({
             </select>
           </label>
           <label className="property-row">
-            <span>背景颜色</span>
+            <span>{t("inspector.backgroundColor")}</span>
             <input
-              aria-label="背景颜色"
+              aria-label={t("inspector.backgroundColor")}
               type="color"
               value={project.background}
               onChange={(e) => onProjectUpdate({ background: e.target.value })}
@@ -266,12 +265,12 @@ export default function Inspector({
           </label>
           <div className="inspector-guide">
             <Image size={30} />
-            <p>选择时间线片段</p>
-            <span>在这里调整画面、音频、文字和动画</span>
+            <p>{t("inspector.selectClipHint")}</p>
+            <span>{t("inspector.selectClipDesc")}</span>
           </div>
           <div className="offline-note">
             <span className="status-dot" />
-            素材留在本机，项目完全离线
+            {t("inspector.offlineGuarantee")}
           </div>
         </div>
       </aside>
@@ -331,35 +330,45 @@ export default function Inspector({
     : visual
       ? ["画面", "音频", "速度", "动画", "调色"]
       : ["音频", "速度", "动画"];
-  const tabLabel = (value: string) =>
-    value === "速度" ? "变速" : value === "调色" ? "调整" : value;
+  const tabLabelMap: Record<string, string> = {
+    "画面": t("inspector.tabVideo"),
+    "音频": t("inspector.tabAudio"),
+    "文本": t("inspector.tabText"),
+    "速度": t("inspector.tabSpeed"),
+    "动画": t("inspector.tabAnimation"),
+    "调色": t("inspector.tabColor"),
+    "裁剪": t("inspector.tabCrop"),
+    "抠像": t("inspector.tabCutout"),
+    "蒙版": t("inspector.tabMask"),
+  };
+  const tabLabel = (value: string) => tabLabelMap[value] || value;
   return (
     <aside className="inspector panel">
       <div className="inspector-tabs">
-        <nav className="inspector-main-tabs" aria-label="片段属性">
-          {tabs.map((t) => (
+        <nav className="inspector-main-tabs" aria-label={t("inspector.title")}>
+          {tabs.map((tb) => (
             <button
-              key={t}
-              aria-label={t}
-              aria-pressed={tab === t || (t === "画面" && pictureActive)}
-              className={tab === t || (t === "画面" && pictureActive) ? "active" : ""}
-              onClick={() => setTab(t)}
+              key={tb}
+              aria-label={tabLabel(tb)}
+              aria-pressed={tab === tb || (tb === "画面" && pictureActive)}
+              className={tab === tb || (tb === "画面" && pictureActive) ? "active" : ""}
+              onClick={() => setTab(tb)}
             >
-              {tabLabel(t)}
+              {tabLabel(tb)}
             </button>
           ))}
         </nav>
         {visual && !clip.text && (
-          <nav className="inspector-picture-tabs" aria-label="画面工具" hidden={!pictureActive}>
-            {pictureTabs.map((t) => (
+          <nav className="inspector-picture-tabs" aria-label={t("inspector.transform")} hidden={!pictureActive}>
+            {pictureTabs.map((pt) => (
               <button
-                key={t}
-                aria-label={t === "画面" ? "基础画面" : t}
-                aria-pressed={tab === t}
-                className={tab === t ? "active" : ""}
-                onClick={() => setTab(t)}
+                key={pt}
+                aria-label={tabLabel(pt)}
+                aria-pressed={tab === pt}
+                className={tab === pt ? "active" : ""}
+                onClick={() => setTab(pt)}
               >
-                {t === "画面" ? "基础" : t}
+                {tabLabel(pt)}
               </button>
             ))}
           </nav>
@@ -367,13 +376,30 @@ export default function Inspector({
       </div>
       <div className="inspector-content">
         <div className="clip-info">
-          <strong>{clip.name}</strong>
+          <div>
+            <strong>{clip.name}</strong>
+            {clip.isCompound && (
+              <span className="tl-compound-badge" style={{ marginLeft: 6 }}>
+                Compound
+              </span>
+            )}
+          </div>
           <span>
             {track.name} · {formatTime(clip.duration, project.fps)}
           </span>
+          {clip.isCompound && (
+            <button
+              type="button"
+              className="secondary-btn"
+              style={{ marginTop: 6, fontSize: 11, padding: "3px 8px" }}
+              onClick={() => useEditorStore.getState().ungroupCompoundClip(clip.id)}
+            >
+              {t("timeline.ungroupCompound") || "Ungroup Compound Clip"}
+            </button>
+          )}
         </div>
         {locked && (
-          <div className="inline-warning">轨道已锁定，解锁后可编辑</div>
+          <div className="inline-warning">{t("inspector.lockedNotice")}</div>
         )}
         <fieldset disabled={locked}>
           {["裁剪", "抠像", "蒙版"].includes(tab) && (
@@ -390,9 +416,9 @@ export default function Inspector({
           {tab === "画面" && (
             <>
               <div className="section-title">
-                <h3>位置大小</h3>
+                <h3>{t("inspector.transform")}</h3>
                 <button
-                  title="重置变换"
+                  title={t("inspector.reset")}
                   onClick={() =>
                     onUpdate({
                       transform: { ...DEFAULT_TRANSFORM },
@@ -406,7 +432,7 @@ export default function Inspector({
                 </button>
               </div>
               <NumberField
-                label="缩放"
+                label={t("inspector.scale")}
                 range
                 value={evaluated.transform.scale * 100}
                 min={1}
@@ -417,20 +443,20 @@ export default function Inspector({
               />
               <div className="position-fields">
               <NumberField
-                label="位置 X"
+                label={`${t("inspector.position")} X`}
                 value={evaluated.transform.x}
                 onChange={(v) => animate("x", v)}
                 diamond={() => key("x", evaluated.transform.x)}
               />
               <NumberField
-                label="位置 Y"
+                label={`${t("inspector.position")} Y`}
                 value={evaluated.transform.y}
                 onChange={(v) => animate("y", v)}
                 diamond={() => key("y", evaluated.transform.y)}
               />
               </div>
               <NumberField
-                label="旋转"
+                label={t("inspector.rotation")}
                 value={evaluated.transform.rotation}
                 min={-3600}
                 max={3600}
@@ -439,7 +465,7 @@ export default function Inspector({
                 diamond={() => key("rotation", evaluated.transform.rotation)}
               />
               <NumberField
-                label="不透明度"
+                label={t("inspector.opacity")}
                 value={evaluated.transform.opacity * 100}
                 min={0}
                 max={100}
@@ -448,11 +474,11 @@ export default function Inspector({
                 diamond={() => key("opacity", evaluated.transform.opacity)}
               />
               <div className="property-row">
-                <span>翻转</span>
+                <span>{t("inspector.flip")}</span>
                 <div className="segmented">
                   <button
                     className={clip.transform.flipX ? "active" : ""}
-                    title="水平翻转"
+                    title={t("inspector.flipH")}
                     onClick={() =>
                       onUpdate({
                         transform: {
@@ -466,7 +492,7 @@ export default function Inspector({
                   </button>
                   <button
                     className={clip.transform.flipY ? "active" : ""}
-                    title="垂直翻转"
+                    title={t("inspector.flipV")}
                     onClick={() =>
                       onUpdate({
                         transform: {
@@ -480,9 +506,37 @@ export default function Inspector({
                   </button>
                 </div>
               </div>
-              <h3>画面淡入淡出</h3>
+              {asset?.color && (
+                <div className="property-row">
+                  <span>{t("creative.solidColor") || "Solid Color"}</span>
+                  <input
+                    aria-label={t("creative.solidColor") || "Solid Color"}
+                    type="color"
+                    value={asset.color}
+                    onChange={(e) => {
+                      const newColor = e.target.value;
+                      const svgUri = `data:image/svg+xml;utf8,${encodeURIComponent(
+                        `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080"><rect width="100%" height="100%" fill="${newColor}"/></svg>`
+                      )}`;
+                      const updatedAssets = project.assets.map((a) =>
+                        a.id === asset.id
+                          ? {
+                              ...a,
+                              color: newColor,
+                              path: `solid:${newColor}`,
+                              src: svgUri,
+                            }
+                          : a
+                      );
+                      onProjectUpdate({ assets: updatedAssets });
+                    }}
+                  />
+                  <code>{asset.color}</code>
+                </div>
+              )}
+              <h3>{t("inspector.fadeIn")} / {t("inspector.fadeOut")}</h3>
               <NumberField
-                label="画面淡入"
+                label={t("inspector.fadeIn")}
                 value={clip.fadeIn}
                 min={0}
                 max={clip.duration}
@@ -491,7 +545,7 @@ export default function Inspector({
                 onChange={(fadeIn) => onUpdate({ fadeIn })}
               />
               <NumberField
-                label="画面淡出"
+                label={t("inspector.fadeOut")}
                 value={clip.fadeOut}
                 min={0}
                 max={clip.duration}
@@ -503,9 +557,9 @@ export default function Inspector({
           )}
           {tab === "音频" && (
             <>
-              <h3>音量</h3>
+              <h3>{t("inspector.volume")}</h3>
               <NumberField
-                label="音量"
+                label={t("inspector.volume")}
                 value={evaluated.volume * 100}
                 min={0}
                 max={400}
@@ -514,17 +568,17 @@ export default function Inspector({
                 diamond={() => key("volume", evaluated.volume)}
               />
               <label className="toggle-property">
-                <span>片段静音</span>
+                <span>{t("timeline.mute")}</span>
                 <input
-                  aria-label="片段静音"
+                  aria-label={t("timeline.mute")}
                   type="checkbox"
                   checked={clip.muted}
                   onChange={(e) => onUpdate({ muted: e.target.checked })}
                 />
               </label>
-              <h3>声音淡入淡出</h3>
+              <h3>{t("inspector.fadeIn")} / {t("inspector.fadeOut")}</h3>
               <NumberField
-                label="声音淡入"
+                label={t("inspector.fadeIn")}
                 value={clip.audioFadeIn}
                 min={0}
                 max={clip.duration}
@@ -533,7 +587,7 @@ export default function Inspector({
                 onChange={(audioFadeIn) => onUpdate({ audioFadeIn })}
               />
               <NumberField
-                label="声音淡出"
+                label={t("inspector.fadeOut")}
                 value={clip.audioFadeOut}
                 min={0}
                 max={clip.duration}
@@ -542,16 +596,16 @@ export default function Inspector({
                 onChange={(audioFadeOut) => onUpdate({ audioFadeOut })}
               />
               {!asset?.hasAudio && (
-                <p className="muted">这段素材没有音频流。</p>
+                <p className="muted">{t("inspector.noAudioStream")}</p>
               )}
             </>
           )}
           {tab === "调色" && (
             <>
               <div className="section-title">
-                <h3>基础调整</h3>
+                <h3>{t("inspector.color")}</h3>
                 <button
-                  title="重置调色"
+                  title={t("inspector.reset")}
                   onClick={() =>
                     onUpdate({ adjustments: { ...DEFAULT_ADJUSTMENTS } })
                   }
@@ -560,7 +614,7 @@ export default function Inspector({
                 </button>
               </div>
               <Slider
-                label="亮度"
+                label={t("inspector.brightness")}
                 value={clip.adjustments.brightness}
                 min={-1}
                 max={1}
@@ -571,7 +625,7 @@ export default function Inspector({
                 }
               />
               <Slider
-                label="对比度"
+                label={t("inspector.contrast")}
                 value={clip.adjustments.contrast}
                 min={0}
                 max={3}
@@ -582,7 +636,7 @@ export default function Inspector({
                 }
               />
               <Slider
-                label="饱和度"
+                label={t("inspector.saturation")}
                 value={clip.adjustments.saturation}
                 min={0}
                 max={3}
@@ -593,7 +647,7 @@ export default function Inspector({
                 }
               />
               <Slider
-                label="色温"
+                label={t("inspector.temperature")}
                 value={clip.adjustments.temperature}
                 min={-1}
                 max={1}
@@ -604,7 +658,7 @@ export default function Inspector({
                 }
               />
               <Slider
-                label="模糊"
+                label={t("inspector.blur")}
                 value={clip.adjustments.blur}
                 min={0}
                 max={100}
@@ -613,32 +667,29 @@ export default function Inspector({
                   onUpdate({ adjustments: { ...clip.adjustments, blur: v } })
                 }
               />
-              <p className="field-hint">
-                预览与导出使用相同的 RGB
-                调整模型，编码与色彩转换可能产生轻微差异。
-              </p>
+              <p className="field-hint">{t("inspector.colorHint")}</p>
             </>
           )}
           {tab === "文本" && clip.text && (
             <>
-              <h3>文字内容</h3>
+              <h3>{t("inspector.textContent")}</h3>
               <textarea
-                aria-label="文字内容"
+                aria-label={t("inspector.textContent")}
                 value={clip.text.text}
                 rows={4}
                 onFocus={() => useEditorStore.getState().beginTransaction()}
                 onBlur={() => useEditorStore.getState().endTransaction()}
                 onChange={(e) =>
                   onUpdate({
-                    name: e.target.value.slice(0, 30) || "文本",
+                    name: e.target.value.slice(0, 30) || t("inspector.defaultText"),
                     text: { ...clip.text!, text: e.target.value },
                   })
                 }
               />
               <label className="property-row">
-                <span>字体</span>
+                <span>{t("inspector.font")}</span>
                 <select
-                  aria-label="字体"
+                  aria-label={t("inspector.font")}
                   value={clip.text.fontFamily}
                   onChange={(e) =>
                     onUpdate({
@@ -646,7 +697,7 @@ export default function Inspector({
                     })
                   }
                 >
-                  <option value="sans-serif">系统默认</option>
+                  <option value="sans-serif">{t("inspector.systemDefault")}</option>
                   {fonts
                     .filter((f) => f !== "sans-serif")
                     .map((f) => (
@@ -655,7 +706,7 @@ export default function Inspector({
                 </select>
               </label>
               <NumberField
-                label="字号"
+                label={t("inspector.fontSize")}
                 value={clip.text.fontSize}
                 min={1}
                 max={1000}
@@ -665,9 +716,9 @@ export default function Inspector({
                 }
               />
               <label className="property-row">
-                <span>文字颜色</span>
+                <span>{t("inspector.textColor")}</span>
                 <input
-                  aria-label="文字颜色"
+                  aria-label={t("inspector.textColor")}
                   type="color"
                   value={clip.text.color}
                   onChange={(e) =>
@@ -676,7 +727,7 @@ export default function Inspector({
                 />
                 <button
                   className={clip.text.bold ? "active" : ""}
-                  title="加粗"
+                  title={t("inspector.bold")}
                   onClick={() =>
                     onUpdate({
                       text: { ...clip.text!, bold: !clip.text!.bold },
@@ -687,12 +738,12 @@ export default function Inspector({
                 </button>
               </label>
               <div className="property-row">
-                <span>对齐</span>
+                <span>{t("inspector.align")}</span>
                 <div className="segmented">
                   {(["left", "center", "right"] as const).map((align, i) => (
                     <button
                       key={align}
-                      title={["左对齐", "居中", "右对齐"][i]}
+                      title={[t("inspector.alignLeft"), t("inspector.alignCenter"), t("inspector.alignRight")][i]}
                       className={clip.text!.align === align ? "active" : ""}
                       onClick={() =>
                         onUpdate({ text: { ...clip.text!, align } })
@@ -709,11 +760,11 @@ export default function Inspector({
                   ))}
                 </div>
               </div>
-              <h3>描边与背景</h3>
+              <h3>{t("inspector.strokeAndBg")}</h3>
               <label className="property-row">
-                <span>描边颜色</span>
+                <span>{t("inspector.stroke")}</span>
                 <input
-                  aria-label="描边颜色"
+                  aria-label={t("inspector.stroke")}
                   type="color"
                   value={clip.text.stroke}
                   onChange={(e) =>
@@ -724,7 +775,7 @@ export default function Inspector({
                 />
               </label>
               <NumberField
-                label="描边宽度"
+                label={t("inspector.strokeWidth")}
                 value={clip.text.strokeWidth}
                 min={0}
                 max={100}
@@ -733,10 +784,10 @@ export default function Inspector({
                 }
               />
               <label className="toggle-property">
-                <span>文字背景</span>
+                <span>{t("inspector.textBackground")}</span>
                 <input
                   type="checkbox"
-                  aria-label="文字背景"
+                  aria-label={t("inspector.textBackground")}
                   checked={clip.text.background !== "transparent"}
                   onChange={(e) =>
                     onUpdate({
@@ -753,7 +804,7 @@ export default function Inspector({
               {clip.text.background !== "transparent" && (
                 <input
                   type="color"
-                  aria-label="文字背景颜色"
+                  aria-label={t("inspector.bgColor")}
                   value={clip.text.background}
                   onChange={(e) =>
                     onUpdate({
@@ -766,9 +817,9 @@ export default function Inspector({
           )}
           {tab === "速度" && (
             <>
-              <h3>常规变速</h3>
+              <h3>{t("inspector.speed")}</h3>
               <NumberField
-                label="播放速度"
+                label={t("inspector.speed")}
                 value={clip.speed}
                 min={0.1}
                 max={8}
@@ -787,12 +838,10 @@ export default function Inspector({
                   </button>
                 ))}
               </div>
-              <p className="field-hint">
-                更改变速会保留源素材范围并调整片段时长。音频保持音高。
-              </p>
-              <h3>时间范围</h3>
+              <p className="field-hint">{t("inspector.speedHint")}</p>
+              <h3>{t("inspector.timeRange")}</h3>
               <NumberField
-                label="开始时间"
+                label={t("sourcePreview.inPoint")}
                 value={clip.start}
                 min={0}
                 step={1 / project.fps}
@@ -800,7 +849,7 @@ export default function Inspector({
                 onChange={(start) => onUpdate({ start })}
               />
               <NumberField
-                label="源素材入点"
+                label={t("sourcePreview.inPoint")}
                 value={clip.sourceIn}
                 min={0}
                 max={Math.max(
@@ -811,9 +860,62 @@ export default function Inspector({
                 suffix="s"
                 onChange={(sourceIn) => onUpdate({ sourceIn })}
               />
-              <p className="muted small">
-                在时间线上拖动片段两侧，可以裁剪入点和出点。
-              </p>
+              <p className="muted small">{t("inspector.trimHint")}</p>
+            </>
+          )}
+          {tab === "速度" && (
+            <>
+              <div className="section-title">
+                <h3>{t("inspector.tabSpeed")}</h3>
+                <button
+                  title={t("inspector.reset")}
+                  onClick={() => useEditorStore.getState().setClipSpeed(clip.id, 1)}
+                >
+                  <RotateCcw size={13} />
+                </button>
+              </div>
+              <div className="speed-presets" style={{ display: "flex", gap: "6px", marginBottom: "12px" }}>
+                {[0.25, 0.5, 1, 2, 4].map((spd) => (
+                  <button
+                    key={spd}
+                    className={`btn-secondary ${clip.speed === spd ? "is-active" : ""}`}
+                    style={{
+                      flex: 1,
+                      padding: "6px 0",
+                      fontSize: "11px",
+                      background: clip.speed === spd ? "#633bfb" : "#2a2a2a",
+                      color: clip.speed === spd ? "#fff" : "#ccc",
+                      borderRadius: "4px",
+                      border: 0,
+                      cursor: "pointer",
+                      fontWeight: clip.speed === spd ? "bold" : "normal",
+                    }}
+                    onClick={() => useEditorStore.getState().setClipSpeed(clip.id, spd)}
+                  >
+                    {spd}x
+                  </button>
+                ))}
+              </div>
+              <NumberField
+                label={t("inspector.tabSpeed")}
+                range
+                value={clip.speed}
+                min={0.1}
+                max={8}
+                step={0.05}
+                suffix="x"
+                onChange={(spd) => useEditorStore.getState().setClipSpeed(clip.id, spd)}
+              />
+              <div className="clip-info" style={{ marginTop: "12px", border: "1px solid #333", padding: "10px", borderRadius: "5px", background: "#1f1f1f" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
+                  <span className="muted">{t("timeline.duration")}:</span>
+                  <span style={{ fontWeight: 600 }}>{formatTime(clip.duration, project.fps)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span className="muted">{t("inspector.tabSpeed")}:</span>
+                  <span style={{ color: "#a78bfa", fontWeight: 600 }}>{clip.speed.toFixed(2)}x</span>
+                </div>
+              </div>
             </>
           )}
           {tab === "动画" && (
@@ -826,11 +928,8 @@ export default function Inspector({
                 visual={visual}
                 onUpdate={onUpdate}
               />
-              <h3>关键帧列表</h3>
-              <p className="field-hint">
-                把播放头移动到目标时间，点击属性旁的 ◇
-                添加关键帧；该属性后续调整会写入当前时间。
-              </p>
+              <h3>{t("keyframes.title")}</h3>
+              <p className="field-hint">{t("keyframes.hint")}</p>
               <div className="keyframe-add">
                 {(["x", "y", "scale", "rotation", "opacity", "volume"] as const)
                   .filter((property) => visual || property === "volume")
@@ -849,19 +948,19 @@ export default function Inspector({
                       <Diamond size={11} />
                       {
                         {
-                          x: "位置 X",
-                          y: "位置 Y",
-                          scale: "缩放",
-                          rotation: "旋转",
-                          opacity: "透明度",
-                          volume: "音量",
+                          x: t("inspector.positionX"),
+                          y: t("inspector.positionY"),
+                          scale: t("inspector.scale"),
+                          rotation: t("inspector.rotation"),
+                          opacity: t("inspector.opacity"),
+                          volume: t("inspector.volume"),
                         }[property]
                       }
                     </button>
                   ))}
               </div>
               {!clip.keyframes.length && (
-                <div className="quiet-empty">还没有关键帧</div>
+                <div className="quiet-empty">{t("keyframes.empty")}</div>
               )}
               {[...clip.keyframes]
                 .sort((a, b) => a.time - b.time)
@@ -877,7 +976,7 @@ export default function Inspector({
                     </button>
                     <span>{k.property}</span>
                     <input
-                      aria-label={`关键帧 ${k.property} 值`}
+                      aria-label={`${t("keyframes.value")}: ${k.property}`}
                       type="number"
                       step={0.01}
                       value={k.value}
@@ -903,7 +1002,7 @@ export default function Inspector({
                       }}
                     />
                     <select
-                      aria-label="关键帧插值"
+                      aria-label={t("keyframes.easing")}
                       value={k.easing}
                       onChange={(e) =>
                         onUpdate({
@@ -919,13 +1018,13 @@ export default function Inspector({
                         })
                       }
                     >
-                      <option value="linear">线性</option>
-                      <option value="easeIn">缓入</option>
-                      <option value="easeOut">缓出</option>
-                      <option value="easeInOut">缓入缓出</option>
+                      <option value="linear">{t("keyframes.linear")}</option>
+                      <option value="easeIn">{t("keyframes.easeIn")}</option>
+                      <option value="easeOut">{t("keyframes.easeOut")}</option>
+                      <option value="easeInOut">{t("keyframes.easeInOut")}</option>
                     </select>
                     <button
-                      aria-label="删除关键帧"
+                      aria-label={t("keyframes.delete")}
                       onClick={() =>
                         onUpdate({
                           keyframes: clip.keyframes.filter(

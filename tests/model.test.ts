@@ -440,3 +440,17 @@ describe("optional source-space visual settings validation", () => {
     }
   });
 });
+
+describe("solid color asset generation", () => {
+  it("creates a solid color media asset with SVG data URI and default dimensions", async () => {
+    const { createSolidColorAsset } = await import("../src/core/model");
+    const asset = createSolidColorAsset("#ff0000", "Red Matte", 1920, 1080);
+    expect(asset.kind).toBe("image");
+    expect(asset.color).toBe("#ff0000");
+    expect(asset.url).toContain("data:image/svg+xml");
+    expect(asset.url).toContain("%23ff0000");
+    expect(asset.width).toBe(1920);
+    expect(asset.height).toBe(1080);
+  });
+});
+

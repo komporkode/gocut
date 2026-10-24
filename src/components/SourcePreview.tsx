@@ -4,6 +4,7 @@ import type { PlacementMode } from "../core/timelineEdits";
 import type { MediaAsset, Track } from "../core/types";
 import { formatTime } from "../core/model";
 import "./SourcePreview.css";
+import { useTranslation } from "../i18n";
 
 export interface SourcePreviewProps {
   asset: MediaAsset;
@@ -19,6 +20,7 @@ export default function SourcePreview(props: SourcePreviewProps) {
   return <SourcePreviewSession key={`${props.asset.id}:${props.asset.url}:${props.asset.previewUrl ?? ""}`} {...props} />;
 }
 function SourcePreviewSession({ asset, fps, onClose, onAddRange, tracks }: SourcePreviewProps) {
+  const { t } = useTranslation();
   const media = useRef<HTMLMediaElement | null>(null);
   const panel = useRef<HTMLElement>(null);
   const alive = useRef(true);
@@ -104,20 +106,20 @@ function SourcePreviewSession({ asset, fps, onClose, onAddRange, tracks }: Sourc
     try { await element.play(); }
     catch (reason) {
       if (alive.current && !(reason instanceof DOMException && reason.name === "AbortError")) {
-        setError("无法播放此素材，请检查格式或重新导入以生成预览代理。");
+        setError(t("player.previewErrorDismiss"));
       }
     }
   };
   const metadata = () => {
     const value = media.current?.duration ?? 0;
-    if (!Number.isFinite(value) || value <= 0) { setError("无法读取素材时长。"); return; }
+    if (!Number.isFinite(value) || value <= 0) { setError(t("player.previewErrorDismiss")); return; }
     const end = knownDuration > 0 ? Math.min(knownDuration, value) : value;
     setDuration(end);setSourceOut(end);setReady(true);
   };
   const mediaError = () => {
     if (!alive.current) return;
     setPlaying(false);setReady(false);
-    setError("无法解码素材预览。请重新导入以生成代理，或检查源文件是否可用。");
+    setError(t("player.previewErrorDismiss"));
   };
   const keyDown = (event: KeyboardEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
@@ -138,44 +140,44 @@ function SourcePreviewSession({ asset, fps, onClose, onAddRange, tracks }: Sourc
     onAddRange(image ? 0 : sourceIn, image ? duration : sourceOut - sourceIn, mode, trackId || undefined);
   };
   return (
-    <section ref={panel} className="source-preview player-panel panel" aria-label="素材源预览" tabIndex={0} onKeyDown={keyDown}
+    <section ref={panel} className="source-preview player-panel panel" aria-label={t("sourcePreview.title")} tabIndex={0} onKeyDown={keyDown}
       onPointerDown={event => { if (!(event.target as HTMLElement).closest("button, input, select")) panel.current?.focus({ preventScroll: true }); }}>
       <header className="panel-heading source-heading">
-        <div><span>素材预览</span><strong title={asset.name}>{asset.name}</strong></div>
-        <button aria-label="返回时间线播放器" title="返回时间线播放器 · Esc" onClick={() => { pause();onClose(); }}><X size={16} /></button>
+        <div><span>{t("sourcePreview.title")}</span><strong title={asset.name}>{asset.name}</strong></div>
+        <button aria-label={t("sourcePreview.backToTimeline")} title={t("sourcePreview.backToTimeline")} onClick={() => { pause();onClose(); }}><X size={16} /></button>
       </header>
       <div className="source-stage">
-        {asset.missing || error ? <div className="source-message source-error" role="alert"><CircleAlert size={26} /><strong>{asset.missing ? "素材文件丢失" : "预览不可用"}</strong><p>{asset.missing ? "请在素材操作菜单中重新链接文件。" : error}</p></div> : image ?
+        {asset.missing || error ? <div className="source-message source-error" role="alert"><CircleAlert size={26} /><strong>{asset.missing ? t("sourcePreview.fileMissing") : t("sourcePreview.unavailable")}</strong><p>{asset.missing ? t("sourcePreview.relinkHint") : error}</p></div> : image ?
           <img src={sourceUrl} alt={asset.name} onLoad={() => setReady(true)} onError={mediaError} /> : asset.kind === "video" ?
           <video ref={element => { media.current = element; }} src={sourceUrl} preload="auto" playsInline muted={muted} onLoadedMetadata={metadata} onError={mediaError} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false);setTime(duration); }} /> :
           <><audio ref={element => { media.current = element; }} src={sourceUrl} preload="auto" muted={muted} onLoadedMetadata={metadata} onError={mediaError} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onEnded={() => { setPlaying(false);setTime(duration); }} />
             <div className="source-audio"><AudioLines size={38} /><strong>{asset.name}</strong><div className="source-waveform" aria-hidden="true">{Array.from({length: 80}, (_, i) => <i key={i} style={{height: `${10 + clamp(asset.waveform?.[Math.floor(i / 80 * asset.waveform.length)] ?? .25, 0, 1) * 85}%`}} />)}</div></div></>}
-        {!asset.missing && !error && !ready && <div className="source-loading">正在读取素材…</div>}
+        {!asset.missing && !error && !ready && <div className="source-loading">{t("sourcePreview.loading")}</div>}
       </div>
       {!image && <>
         <div className="source-seek">
           <div className="source-range-highlight" aria-hidden="true" style={{left: `${duration > 0 ? sourceIn / duration * 100 : 0}%`,width: `${duration > 0 ? (sourceOut-sourceIn)/duration*100 : 100}%`}} />
-          <input aria-label="素材预览进度" type="range" min={0} max={duration || 1} step={frame} value={time} disabled={unavailable} onChange={event => seek(Number(event.target.value))} />
+          <input aria-label={t("sourcePreview.seekProgress")} type="range" min={0} max={duration || 1} step={frame} value={time} disabled={unavailable} onChange={event => seek(Number(event.target.value))} />
         </div>
         <div className="source-controls">
           <span className="timecode"><strong>{formatTime(time,frameRate)}</strong><span> / {formatTime(duration,frameRate)}</span></span>
-          <div className="source-transport"><button aria-label="源素材上一帧" disabled={unavailable} onClick={() => seek(time-frame)}><ChevronLeft size={16} /></button><button aria-label={playing ? "暂停素材" : "播放素材"} disabled={unavailable} onClick={() => void playPause()}>{playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button aria-label="源素材下一帧" disabled={unavailable} onClick={() => seek(time+frame)}><ChevronRight size={16} /></button></div>
-          <button aria-label={muted ? "开启源素材声音" : "静音源素材"} onClick={() => setMuted(!muted)} disabled={unavailable}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
+          <div className="source-transport"><button aria-label={t("player.prevFrame")} disabled={unavailable} onClick={() => seek(time-frame)}><ChevronLeft size={16} /></button><button aria-label={playing ? t("player.pause") : t("player.play")} disabled={unavailable} onClick={() => void playPause()}>{playing ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button><button aria-label={t("player.nextFrame")} disabled={unavailable} onClick={() => seek(time+frame)}><ChevronRight size={16} /></button></div>
+          <button aria-label={muted ? t("timeline.unmute") : t("timeline.mute")} onClick={() => setMuted(!muted)} disabled={unavailable}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
         </div>
       </>}
       <footer className="source-range">
         {!image && <div className="source-marks">
-          <label><button title="将当前位置设为入点 · I" aria-label="标记源素材入点" disabled={unavailable} onClick={() => setIn(time)}>入点 <kbd>I</kbd></button><input aria-label="源素材入点" type="number" min={0} max={Math.max(0,sourceOut-minLength)} step={frame} value={Number(sourceIn.toFixed(6))} disabled={unavailable} onChange={event => {if(event.target.value !== "") setIn(Number(event.target.value));}} /><span>秒</span></label>
-          <label><button title="将当前位置设为出点 · O" aria-label="标记源素材出点" disabled={unavailable} onClick={() => setOut(time)}>出点 <kbd>O</kbd></button><input aria-label="源素材出点" type="number" min={sourceIn+minLength} max={duration} step={frame} value={Number(sourceOut.toFixed(6))} disabled={unavailable} onChange={event => {if(event.target.value !== "") setOut(Number(event.target.value));}} /><span>秒</span></label>
-          <button title="重置为完整素材" aria-label="重置源素材范围" disabled={unavailable} onClick={() => {setSourceIn(0);setSourceOut(duration);seek(0);}}><RotateCcw size={14} /></button>
+          <label><button title={t("sourcePreview.setIn")} aria-label={t("sourcePreview.setIn")} disabled={unavailable} onClick={() => setIn(time)}>{t("sourcePreview.inPoint")} <kbd>I</kbd></button><input aria-label={t("sourcePreview.inPoint")} type="number" min={0} max={Math.max(0,sourceOut-minLength)} step={frame} value={Number(sourceIn.toFixed(6))} disabled={unavailable} onChange={event => {if(event.target.value !== "") setIn(Number(event.target.value));}} /><span>s</span></label>
+          <label><button title={t("sourcePreview.setOut")} aria-label={t("sourcePreview.setOut")} disabled={unavailable} onClick={() => setOut(time)}>{t("sourcePreview.outPoint")} <kbd>O</kbd></button><input aria-label={t("sourcePreview.outPoint")} type="number" min={sourceIn+minLength} max={duration} step={frame} value={Number(sourceOut.toFixed(6))} disabled={unavailable} onChange={event => {if(event.target.value !== "") setOut(Number(event.target.value));}} /><span>s</span></label>
+          <button title={t("sourcePreview.resetRange")} aria-label={t("sourcePreview.resetRange")} disabled={unavailable} onClick={() => {setSourceIn(0);setSourceOut(duration);seek(0);}}><RotateCcw size={14} /></button>
         </div>}
         {tracks && <div className="source-placement">
-          <label>入轨方式<select aria-label="入轨方式" value={mode} onChange={e => setMode(e.target.value as PlacementMode)}><option value="insert">插入（整体后移）</option><option value="overwrite">覆盖（保留两侧）</option><option value="overlay">叠加（不移动）</option></select></label>
-          <label>目标轨道<select aria-label="目标轨道" value={trackId} onChange={e => setTrackId(e.target.value)}><option value="">自动选择 / 新建</option>{tracks.map(t => <option key={t.id} value={t.id} disabled={t.locked}>{t.name}{t.locked ? " · 已锁定" : ""}</option>)}</select></label>
+          <label>{t("sourcePreview.placementMode")}<select aria-label={t("sourcePreview.placementMode")} value={mode} onChange={e => setMode(e.target.value as PlacementMode)}><option value="insert">{t("sourcePreview.insert")}</option><option value="overwrite">{t("sourcePreview.overwrite")}</option><option value="overlay">{t("sourcePreview.overlay")}</option></select></label>
+          <label>{t("sourcePreview.targetTrack")}<select aria-label={t("sourcePreview.targetTrack")} value={trackId} onChange={e => setTrackId(e.target.value)}><option value="">{t("sourcePreview.autoTrack")}</option>{tracks.map(trk => <option key={trk.id} value={trk.id} disabled={trk.locked}>{trk.name}{trk.locked ? ` · ${t("timeline.trackLocked")}` : ""}</option>)}</select></label>
         </div>}
-        <div className="source-add-row"><span>{image ? `${asset.width} × ${asset.height} · 图片` : <><Brackets size={12} /> 已选 {formatTime(Math.max(0, sourceOut-sourceIn),frameRate)}</>}</span><button className="primary" disabled={unavailable} onClick={add}><Plus size={14} />{image ? "添加图片" : "添加选中片段"}</button></div>
-        {!image && <p className="source-tip">{tracks ? (mode === "insert" ? "在播放头插入，所有轨道后续内容一起后移；受影响锁轨会阻止操作。" : mode === "overwrite" ? "覆盖目标轨及关联画声区间，其他轨道保留。" : "叠加到播放头，不移动或裁掉已有内容。") : "聚焦预览后按 I / O 标记，空格播放选段，← / → 逐帧定位"}</p>}
-        {!image && ready && duration < frame - 1e-8 && <p className="source-error">素材不足项目的一帧，暂时无法添加。</p>}
+        <div className="source-add-row"><span>{image ? `${asset.width} × ${asset.height} · ${t("nav.media")}` : <><Brackets size={12} /> {t("sourcePreview.selectedSpan", { time: formatTime(Math.max(0, sourceOut-sourceIn), frameRate) })}</>}</span><button className="primary" disabled={unavailable} onClick={add}><Plus size={14} />{image ? t("sourcePreview.addImage") : t("sourcePreview.addClip")}</button></div>
+        {!image && <p className="source-tip">{tracks ? (mode === "insert" ? t("sourcePreview.insertTip") : mode === "overwrite" ? t("sourcePreview.overwriteTip") : t("sourcePreview.overlayTip")) : t("sourcePreview.shortcutTip")}</p>}
+        {!image && ready && duration < frame - 1e-8 && <p className="source-error">{t("sourcePreview.tooShort")}</p>}
       </footer>
     </section>
   );
