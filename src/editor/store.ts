@@ -704,8 +704,21 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   deleteSelected: () => {
     const s = get(),
-      p = s.project,
-      selected = new Set(linkedIds(p, s.selectedIds)),
+      p = s.project;
+    if (s.nestedTimelineScope) {
+      const compound = p.clips.find((c) => c.id === s.nestedTimelineScope);
+      if (compound && compound.nestedClips) {
+        const selected = new Set(s.selectedIds);
+        const remainingNested = compound.nestedClips.filter((nc) => !selected.has(nc.id));
+        const updatedClips = p.clips.map((c) =>
+          c.id === compound.id ? { ...c, nestedClips: remainingNested } : c,
+        );
+        get().commit({ ...p, clips: updatedClips });
+        set({ selectedIds: [] });
+        return;
+      }
+    }
+    const selected = new Set(linkedIds(p, s.selectedIds)),
       removed = p.clips.filter(
         (c) => selected.has(c.id),
       );

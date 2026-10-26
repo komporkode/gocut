@@ -588,6 +588,15 @@ export default function App() {
     [initialized, setInitialized] = useState(false);
   useEffect(() => { setSourceAssetId(null); }, [s.project.id, modal, s.selectedIds]);
   useEffect(() => {
+    const title = s.project.name ? `${s.project.name} — GoCut` : "GoCut · Video Editor";
+    document.title = title;
+    if (typeof window !== "undefined" && (window as any).runtime?.WindowSetTitle) {
+      try {
+        (window as any).runtime.WindowSetTitle(title);
+      } catch {}
+    }
+  }, [s.project.name]);
+  useEffect(() => {
     return useEditorStore.subscribe((state, prev) => {
       if (state.playing && !prev.playing) setSourceAssetId(null);
     });
@@ -783,7 +792,7 @@ export default function App() {
         url = URL.createObjectURL(blob),
         a = document.createElement("a");
       a.href = url;
-      a.download = s.project.name + ".reacut";
+      a.download = s.project.name + ".gocut";
       a.click();
       URL.revokeObjectURL(url);
       notify(t("notify.jsonDownloaded"));

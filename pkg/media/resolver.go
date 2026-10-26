@@ -135,13 +135,6 @@ func ResolvePath(rawPath string) (string, error) {
 		)
 	}
 
-	// Project & CapCut materials directories
-	directCandidates = append(directCandidates,
-		filepath.Join("D:\\PROJECT\\GAWEAN\\CAPCUT\\Bahan", baseName),
-		filepath.Join("D:\\PROJECT\\GAWEAN", baseName),
-		filepath.Join("D:\\", baseName),
-	)
-
 	for _, cand := range directCandidates {
 		if info, err := os.Stat(cand); err == nil && !info.IsDir() {
 			resolvedCache.Store(rawPath, cand)
@@ -151,12 +144,9 @@ func ResolvePath(rawPath string) (string, error) {
 	}
 
 	// 4. Bounded recursive search in primary media locations
-	searchRoots := []struct {
+	var searchRoots []struct {
 		path     string
 		maxDepth int
-	}{
-		{"D:\\PROJECT\\GAWEAN\\CAPCUT", 6},
-		{"D:\\PROJECT\\GAWEAN", 4},
 	}
 
 	if home != "" {

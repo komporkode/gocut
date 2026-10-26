@@ -147,9 +147,9 @@ func (a *App) OpenProject(path string) (*ProjectOpenResult, error) {
 	if target == "" {
 		var err error
 		target, err = runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-			Title: "Open ReaCut Project",
+			Title: "Open GoCut Project",
 			Filters: []runtime.FileFilter{
-				{DisplayName: "ReaCut Project (*.reacut)", Pattern: "*.reacut;*.json"},
+				{DisplayName: "GoCut Project (*.gocut;*.reacut;*.json)", Pattern: "*.gocut;*.reacut;*.json"},
 			},
 		})
 		if err != nil || target == "" {
@@ -176,10 +176,10 @@ func (a *App) SaveProject(projectJson string, path string) (string, error) {
 	if target == "" {
 		var err error
 		target, err = runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
-			Title:           "Save ReaCut Project",
-			DefaultFilename: "project.reacut",
+			Title:           "Save GoCut Project",
+			DefaultFilename: "project.gocut",
 			Filters: []runtime.FileFilter{
-				{DisplayName: "ReaCut Project (*.reacut)", Pattern: "*.reacut"},
+				{DisplayName: "GoCut Project (*.gocut;*.reacut)", Pattern: "*.gocut;*.reacut"},
 			},
 		})
 		if err != nil || target == "" {

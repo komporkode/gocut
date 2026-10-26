@@ -204,6 +204,9 @@ func (r *Runner) Probe(filePath string) (*MediaProbeResult, error) {
 }
 
 func (r *Runner) EnsureProxy(filePath string, codec string) (string, error) {
+	if filePath == "" {
+		return "", nil
+	}
 	ext := strings.ToLower(filepath.Ext(filePath))
 	isAppleMov := ext == ".mov"
 	isHevc := strings.Contains(strings.ToLower(codec), "hevc") || strings.Contains(strings.ToLower(codec), "hvc1") || strings.Contains(strings.ToLower(codec), "hev1")

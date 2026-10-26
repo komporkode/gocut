@@ -82,7 +82,7 @@ export function recoverAudio(p: Project, clipId: string): Project {
   if (isTargetAudio && target.linkId) {
     const parentVideo = p.clips.find(c => c.id !== target.id && c.linkId === target.linkId && p.tracks.find(t => t.id === c.trackId)?.kind !== 'audio');
     const remainingClips = p.clips.filter(c => c.id !== target.id);
-    const remainingAssets = p.assets.filter(a => a.id !== target.assetId);
+    const remainingAssets = p.assets.filter(a => a.id !== target.assetId || remainingClips.some(c => c.assetId === a.id));
     return {
       ...p,
       assets: remainingAssets,
@@ -94,7 +94,7 @@ export function recoverAudio(p: Project, clipId: string): Project {
   if (target.muted && target.linkId) {
     const audioClip = p.clips.find(c => c.id !== target.id && c.linkId === target.linkId && p.tracks.find(t => t.id === c.trackId)?.kind === 'audio');
     const remainingClips = p.clips.filter(c => c.id !== audioClip?.id);
-    const remainingAssets = p.assets.filter(a => a.id !== audioClip?.assetId);
+    const remainingAssets = p.assets.filter(a => a.id !== audioClip?.assetId || remainingClips.some(c => c.assetId === a.id));
     return {
       ...p,
       assets: remainingAssets,
@@ -512,6 +512,36 @@ export function ungroupCompoundClip(
     ...project,
     clips: [...remainingClips, ...restoredClips],
     updatedAt: new Date().toISOString(),
+  };
+}
+
+export function flattenCompoundClips(project: Project): Project {
+  if (!project.clips.some((c) => c.isCompound && c.nestedClips && c.nestedClips.length > 0)) {
+    return project;
+  }
+  const flattenedClips: Clip[] = [];
+  for (const c of project.clips) {
+    if (c.isCompound && c.nestedClips && c.nestedClips.length > 0) {
+      const compoundSpeed = c.speed > 0 ? c.speed : 1;
+      const baseStart = c.start;
+      for (const nested of c.nestedClips) {
+        flattenedClips.push({
+          ...clone(nested),
+          id: id(),
+          start: baseStart + Math.max(0, nested.start - c.sourceIn) / compoundSpeed,
+          duration: nested.duration / compoundSpeed,
+          speed: (nested.speed > 0 ? nested.speed : 1) * compoundSpeed,
+          volume: (nested.volume ?? 1) * (c.volume ?? 1),
+          muted: c.muted || nested.muted,
+        });
+      }
+    } else {
+      flattenedClips.push(c);
+    }
+  }
+  return {
+    ...project,
+    clips: flattenedClips.sort((a, b) => a.start - b.start),
   };
 }
 

@@ -497,7 +497,7 @@ export const tr: Record<TranslationKey, string> = {
   "package.cancel": "Cancel Packaging",
   "package.desktopOnly": "Collecting project assets requires the desktop application",
   "package.failed": "Packaging failed",
-  "about.title": "About ReaCut",
+  "about.title": "About GoCut",
   "about.tagline": "Independent, lightweight, offline video editor with zero tracking",
   "about.description": "Supports multi-track editing, keyframe animation, color grading, subtitles, and CapCut draft interoperability. Runs completely offline to protect your creative privacy.",
   "about.version": "Version",

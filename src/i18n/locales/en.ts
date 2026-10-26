@@ -314,7 +314,7 @@ export const en: Record<TranslationKey, string> = {
   "package.failed": "Packaging failed",
 
   // About Dialog
-  "about.title": "About ReaCut",
+  "about.title": "About GoCut",
   "about.tagline": "Independent, lightweight, offline video editor with zero tracking",
   "about.description": "Supports multi-track editing, keyframe animation, color grading, subtitles, and CapCut draft interoperability. Runs completely offline to protect your creative privacy.",
   "about.version": "Version",

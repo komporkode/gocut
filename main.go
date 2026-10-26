@@ -18,7 +18,7 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:             "ReaCut",
+		Title:             "GoCut",
 		Width:             1500,
 		Height:            950,
 		MinWidth:          1024,
@@ -50,6 +50,6 @@ func main() {
 	})
 
 	if err != nil {
-		println("Error starting ReaCut:", err.Error())
+		println("Error starting GoCut:", err.Error())
 	}
 }

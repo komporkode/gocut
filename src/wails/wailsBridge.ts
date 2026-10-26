@@ -8,6 +8,7 @@ import type {
   Project,
   RecentProject,
 } from "../core/types";
+import { flattenCompoundClips } from "../core/timelineEdits";
 import * as App from "../../wailsjs/go/main/App";
 import * as Runtime from "../../wailsjs/runtime/runtime";
 
@@ -242,8 +243,9 @@ export function createWailsBridge(): EditorAPI {
     },
 
     exportProject: async (project: Project, options: ExportOptions) => {
+      const flattened = flattenCompoundClips(project);
       const jobId = await App.StartExport(
-        JSON.stringify(project),
+        JSON.stringify(flattened),
         JSON.stringify(options)
       );
       return { jobId };

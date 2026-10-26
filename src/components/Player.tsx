@@ -375,6 +375,16 @@ export default function Player(props: PlayerProps) {
           .filter((nc) => localCompound >= nc.start && localCompound < nc.start + nc.duration)
           .sort((a, b) => a.start - b.start);
         for (const nc of activeNested) {
+          ctx.save();
+          if (nc.transform) {
+            ctx.translate(nc.transform.x, nc.transform.y);
+            ctx.rotate((nc.transform.rotation * Math.PI) / 180);
+            ctx.scale(
+              nc.transform.scale * (nc.transform.flipX ? -1 : 1),
+              nc.transform.scale * (nc.transform.flipY ? -1 : 1),
+            );
+            ctx.globalAlpha *= Math.max(0, Math.min(1, nc.transform.opacity));
+          }
           if (nc.text) {
             const layer = textPreviewLayer(nc);
             ctx.drawImage(layer.canvas, -layer.width / 2, -layer.height / 2, layer.width, layer.height);
@@ -405,6 +415,7 @@ export default function Player(props: PlayerProps) {
               }
             }
           }
+          ctx.restore();
         }
       } else if (clip.text) {
         const layer = textPreviewLayer(clip);
