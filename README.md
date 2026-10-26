@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.7.0--beta-blue?style=flat-square" alt="Version: v0.7.0-beta" />
+  <img src="https://img.shields.io/badge/version-v0.7.0-blue?style=flat-square" alt="Version: v0.7.0-beta" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-45d6c0?style=flat-square" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/backend-Go_1.23+_·_Wails_v2-00ADD8?style=flat-square" alt="Backend: Go & Wails" />
   <img src="https://img.shields.io/badge/frontend-React_19_·_TypeScript_·_Vite-61DAFB?style=flat-square" alt="Frontend: React & Vite" />

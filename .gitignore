@@ -1,6 +1,11 @@
+.agents/
+.github/
+.superpowers/
+
 node_modules/
 dist/
 dist-electron/
+docs/
 release/
 .research/
 .test-output/

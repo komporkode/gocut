@@ -297,4 +297,116 @@ describe('rippleSnapTrack and rippleSnapAllTracks (magnetic)', () => {
     expect(snapped.clips[0].start).toBe(0);
     expect(snapped.clips[1].start).toBe(0); // Linked audio shifted by the exact same delta
   });
+
+  it('eliminates overlaps by advancing cursor when clips overlap on track', async () => {
+    const { rippleSnapTrack } = await import('../src/core/timelineEdits');
+    const p = fixture();
+    // Clip 1 starts at 0s, duration 6s
+    const c2 = createClip(p.assets[0], p.tracks[1].id, 3, p.fps); // overlaps at 3s
+    c2.duration = 4;
+    p.clips.push(c2);
+
+    const snapped = rippleSnapTrack(p, p.tracks[1].id);
+    const snapClips = snapped.clips.filter(c => c.trackId === p.tracks[1].id).sort((a, b) => a.start - b.start);
+    expect(snapClips[0].start).toBe(0);
+    expect(snapClips[0].duration).toBe(6);
+    expect(snapClips[1].start).toBe(6); // Rescheduled cleanly against end of clip 1
+    expect(snapClips[1].duration).toBe(4);
+  });
 });
+
+describe('reorderClip and swapClips', () => {
+  it('reorders clip on main track via ripple insertion', async () => {
+    const { reorderClip } = await import('../src/core/timelineEdits');
+    const p = fixture(); // Clip A: start 0, duration 6 (mid 3s)
+    const cB = createClip(p.assets[0], p.tracks[1].id, 6, p.fps);
+    cB.duration = 4; // Clip B: start 6, duration 4 (mid 8s)
+    const cC = createClip(p.assets[0], p.tracks[1].id, 10, p.fps);
+    cC.duration = 5;
+    p.clips.push(cB, cC);
+
+    // Reorder Clip C to time 7s (between Clip A and B, since 3s < 7s < 8s)
+    const reordered = reorderClip(p, cC.id, p.tracks[1].id, 7, 'insert');
+    const trackClips = reordered.clips.filter(c => c.trackId === p.tracks[1].id).sort((a, b) => a.start - b.start);
+    // Clip A (0..6), Clip C (6..11), Clip B (11..15)
+    expect(trackClips.map(c => c.id)).toEqual([p.clips[0].id, cC.id, cB.id]);
+    expect(trackClips[0].start).toBe(0);
+    expect(trackClips[1].start).toBe(6);
+    expect(trackClips[2].start).toBe(11);
+  });
+
+  it('reorders clip and preserves synchronized linked audio', async () => {
+    const { reorderClip } = await import('../src/core/timelineEdits');
+    const p = pair(); // Clip A (video track 1, start 0) and Audio A (audio track 2, start 0, linked)
+    const cB = createClip(p.assets[0], p.tracks[1].id, 6, p.fps);
+    cB.duration = 4; // Clip B: start 6, duration 4 (mid 8s)
+    p.clips.push(cB);
+
+    // Move Clip A to after Clip B (time 9s > mid 8s)
+    const reordered = reorderClip(p, p.clips[0].id, p.tracks[1].id, 9, 'insert');
+    const videoClips = reordered.clips.filter(c => c.trackId === p.tracks[1].id).sort((a, b) => a.start - b.start);
+    expect(videoClips.map(c => c.id)).toEqual([cB.id, p.clips[0].id]);
+    expect(videoClips[0].start).toBe(0);
+    expect(videoClips[1].start).toBe(4);
+
+    // Linked audio clip must have moved to start 4 as well!
+    const audioClip = reordered.clips.find(c => c.linkId === p.clips[0].linkId && c.id !== p.clips[0].id)!;
+    expect(audioClip.start).toBe(4);
+  });
+
+  it('swaps adjacent clips on track with swapClips', async () => {
+    const { swapClips } = await import('../src/core/timelineEdits');
+    const p = fixture(); // Clip A: start 0, dur 6
+    const cB = createClip(p.assets[0], p.tracks[1].id, 6, p.fps);
+    cB.duration = 4;
+    p.clips.push(cB);
+
+    // Swap Clip A with next clip
+    const swapped = swapClips(p, p.clips[0].id, 'next');
+    const trackClips = swapped.clips.filter(c => c.trackId === p.tracks[1].id).sort((a, b) => a.start - b.start);
+    expect(trackClips[0].id).toBe(cB.id);
+    expect(trackClips[0].start).toBe(0);
+    expect(trackClips[0].duration).toBe(4);
+    expect(trackClips[1].id).toBe(p.clips[0].id);
+    expect(trackClips[1].start).toBe(4);
+    expect(trackClips[1].duration).toBe(6);
+
+    // Swap back
+    const swappedBack = swapClips(swapped, p.clips[0].id, 'prev');
+    const backClips = swappedBack.clips.filter(c => c.trackId === p.tracks[1].id).sort((a, b) => a.start - b.start);
+    expect(backClips[0].id).toBe(p.clips[0].id);
+    expect(backClips[0].start).toBe(0);
+    expect(backClips[1].id).toBe(cB.id);
+    expect(backClips[1].start).toBe(6);
+  });
+
+  it('separates audio from video to audio track below and can recover cleanly', async () => {
+    const { separateAudio, recoverAudio } = await import('../src/core/timelineEdits');
+    const p = fixture(); // clip A is on video track (p.tracks[1]), asset hasAudio = true
+    const videoClip = p.clips[0];
+
+    // Separate audio
+    const separated = separateAudio(p, videoClip.id);
+    const updatedVideo = separated.project.clips.find(c => c.id === videoClip.id)!;
+    expect(updatedVideo.muted).toBe(true);
+    expect(updatedVideo.linkId).toBeDefined();
+
+    const audioClip = separated.project.clips.find(c => c.id === separated.audioId)!;
+    expect(audioClip).toBeDefined();
+    expect(audioClip.linkId).toBe(updatedVideo.linkId);
+    expect(audioClip.start).toBe(videoClip.start);
+    expect(audioClip.duration).toBe(videoClip.duration);
+
+    const audioTrack = separated.project.tracks.find(t => t.id === audioClip.trackId)!;
+    expect(audioTrack.kind).toBe('audio');
+
+    // Recover audio from video clip
+    const recovered = recoverAudio(separated.project, videoClip.id);
+    const restoredVideo = recovered.clips.find(c => c.id === videoClip.id)!;
+    expect(restoredVideo.muted).toBe(false);
+    expect(restoredVideo.linkId).toBeUndefined();
+    // Audio clip must be removed
+    expect(recovered.clips.some(c => c.id === separated.audioId)).toBe(false);
+  });
+});
+

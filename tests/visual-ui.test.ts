@@ -74,5 +74,26 @@ describe("optional tools defaults", () => {
     applyShapeMask(pixels, 2, 2, { shape: "rectangle", width: 0.1, height: 0.1, feather: 0, invert: false });
     expect(pixels[3]).toBe(0);
   });
+  it("defines floating drag item and insertion beam in Timeline.css", async () => {
+    const fs = await import("fs");
+    const css = fs.readFileSync("src/components/Timeline.css", "utf-8");
+    expect(css).toContain(".tl-floating-drag-item");
+    expect(css).toContain(".tl-insertion-beam");
+    expect(css).toContain(".tl-track.is-drag-target");
+  });
+  it("keeps transition block below track headers", async () => {
+    const fs = await import("fs");
+    const styles = fs.readFileSync("src/styles.css", "utf-8");
+    const timelineCss = fs.readFileSync("src/components/Timeline.css", "utf-8");
+    expect(styles).toContain(".tl-transition-block {");
+    expect(styles).toMatch(/\.tl-transition-block\s*\{[^}]*z-index:\s*6;/);
+    expect(timelineCss).toMatch(/\.tl-track-header\s*\{[^}]*z-index:\s*20;/);
+  });
+  it("preserves blob: and data: URLs in toMediaStreamUrl", async () => {
+    const { toMediaStreamUrl } = await import("../src/wails/wailsBridge");
+    expect(toMediaStreamUrl("blob:http://localhost:5173/123-abc")).toBe("blob:http://localhost:5173/123-abc");
+    expect(toMediaStreamUrl("data:image/svg+xml;utf8,<svg></svg>")).toBe("data:image/svg+xml;utf8,<svg></svg>");
+    expect(toMediaStreamUrl("D:/video.mp4")).toContain("/media-stream?path=");
+  });
 });
 

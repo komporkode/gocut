@@ -36,11 +36,12 @@ import {
 } from "lucide-react";
 import type { Clip, Project, Track, TrackKind } from "../core/types";
 import { linkedIds, trimLinked, rippleSnapAllTracks } from "../core/timelineEdits";
-import { snapToFrame } from "../core/model";
+import { snapToFrame, createTrack, createClip } from "../core/model";
+import { motionPatch, type MotionId, type TextPreset } from "../core/creativePresets";
 import "./Timeline.css";
 import TimelineContextMenu, { type ContextMenuItem } from "./TimelineContextMenu";
 import { useTranslation, type TranslationKey } from "../i18n";
-import { useEditorStore } from "../editor/store";
+import { useEditorStore, pruneEmptyOverlayTracks } from "../editor/store";
 
 export interface TimelineProps {
   project: Project;
@@ -154,35 +155,55 @@ export function rulerInterval(pixelsPerSecond: number) {
     ) ?? 1200
   );
 }
-/** Separate overlapping intervals into visual sublanes without changing project tracks. */
+/** Flat track layout in CapCut style: all clips on a track render on a single row (lane 0) with fixed track height. */
 export function layoutTrackClips(clips: Clip[]) {
-  const ends: number[] = [];
   const lanes = new Map<string, number>();
-  const sorted = [...clips].sort((a, b) => a.start - b.start);
-  for (let i = 0; i < sorted.length; i++) {
-    const clip = sorted[i];
-    const prev = sorted[i - 1];
-    // Adjacent clips with transition overlap share the same lane (non-stacking, CapCut style)
-    const isTransitionOverlap = prev && (
-      (clip.fadeIn > 0 || prev.fadeOut > 0 || clip.videoFadeWindow || prev.videoFadeWindow) &&
-      clip.start >= prev.start + prev.duration - Math.max(prev.fadeOut, clip.fadeIn, 2.5) - 0.05
-    );
-    let lane = ends.findIndex((end) => end <= clip.start + 0.00001);
-    if (lane < 0 && isTransitionOverlap && ends.length > 0) {
-      lane = lanes.get(prev.id) ?? 0;
-    }
-    if (lane < 0) lane = ends.length;
-    ends[lane] = Math.max(ends[lane] ?? 0, clip.start + clip.duration);
-    lanes.set(clip.id, lane);
+  for (const clip of clips) {
+    lanes.set(clip.id, 0);
   }
   return {
     lanes,
-    count: Math.max(1, ends.length),
-    height: Math.max(ROW, ends.length * 62 + 8),
+    count: 1,
+    height: ROW,
   };
 }
-export function canMoveToTrack(clip: Clip, track: Track, project: Project) {
-  if (track.locked) return false;
+export function calculateInsertionSlot(
+  time: number,
+  trackClips: Clip[],
+  primaryClipId: string,
+): { insertTime: number; insertIndex: number } {
+  const others = trackClips
+    .filter((c) => c.id !== primaryClipId)
+    .sort((a, b) => a.start - b.start);
+  if (!others.length) return { insertTime: 0, insertIndex: 0 };
+
+  const firstMid = others[0].start + others[0].duration / 2;
+  if (time < firstMid) {
+    return { insertTime: 0, insertIndex: 0 };
+  }
+
+  for (let i = 0; i < others.length - 1; i++) {
+    const cur = others[i];
+    const next = others[i + 1];
+    const mid1 = cur.start + cur.duration / 2;
+    const mid2 = next.start + next.duration / 2;
+    if (time >= mid1 && time < mid2) {
+      return {
+        insertTime: cur.start + cur.duration,
+        insertIndex: i + 1,
+      };
+    }
+  }
+
+  const last = others[others.length - 1];
+  return {
+    insertTime: last.start + last.duration,
+    insertIndex: others.length,
+  };
+}
+
+export function canMoveToTrack(clip: Clip, track: Track | undefined, project: Project) {
+  if (!track || track.locked) return false;
   if (clip.text) return track.kind === "text";
   const kind =
     project.assets.find((a) => a.id === clip.assetId)?.kind ??
@@ -231,6 +252,9 @@ type Gesture =
       primaryId: string;
       trackId: string;
       targetTrackId: string;
+      pointerX?: number;
+      pointerY?: number;
+      insertSlot?: { insertTime: number; insertIndex: number };
     }
   | { kind: "trim"; id: string; edge: "start" | "end"; time: number }
   | { kind: "marquee"; x: number; y: number; width: number; height: number };
@@ -243,6 +267,12 @@ export default function Timeline(props: TimelineProps) {
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
   const splitAt = useEditorStore((s) => s.splitAt);
   const storeCloseGap = useEditorStore((s) => s.closeGap);
+  const nestedTimelineScope = useEditorStore((s) => s.nestedTimelineScope);
+  const exitCompoundClip = useEditorStore((s) => s.exitCompoundClip);
+  const enterCompoundClip = useEditorStore((s) => s.enterCompoundClip);
+  const separateAudio = useEditorStore((s) => s.separateAudio);
+  const recoverAudio = useEditorStore((s) => s.recoverAudio);
+  const ungroupCompoundClip = useEditorStore((s) => s.ungroupCompoundClip);
   const activeTool = storeActiveTool ?? "select";
   const [selectedGap, setSelectedGap] = useState<{ trackId: string; start: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -253,6 +283,9 @@ export default function Timeline(props: TimelineProps) {
   const playhead = props.playhead ?? storePlayhead;
   const playing = props.playing ?? storePlaying;
   const { project, selectedIds, zoom, onSeek, onSelect } = props;
+  const activeCompoundClip = nestedTimelineScope
+    ? project.clips.find((c) => c.id === nestedTimelineScope)
+    : null;
   const scrollRef = useRef<HTMLDivElement>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement>(null);
@@ -279,6 +312,7 @@ export default function Timeline(props: TimelineProps) {
   const [deleteTrackId, setDeleteTrackId] = useState<string | null>(null);
   const [trackMenu, setTrackMenu] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(800);
+  const [viewportHeight, setViewportHeight] = useState(300);
   const [draggedKind, setDraggedKind] = useState<TrackKind | null>(null);
   const [localSnap, setLocalSnap] = useState(true);
   const [localMagnetic, setLocalMagnetic] = useState(false);
@@ -297,6 +331,23 @@ export default function Timeline(props: TimelineProps) {
     { length: Math.ceil(duration / interval) + 1 },
     (_, i) => i * interval,
   );
+
+  useEffect(() => {
+    if (!selectedTransition) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Backspace" || e.key === "Delete") {
+        e.preventDefault();
+        e.stopPropagation();
+        useEditorStore.getState().removeTransition(selectedTransition);
+        setSelectedTransition(null);
+      } else if (e.key === "Escape") {
+        setSelectedTransition(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [selectedTransition]);
+
   const setActiveGesture = (g: Gesture | null) => {
     if (g && g.kind !== "marquee" && !frozenLayoutsRef.current)
       frozenLayoutsRef.current = trackLayouts.map((layout) => ({
@@ -309,35 +360,33 @@ export default function Timeline(props: TimelineProps) {
   };
   const trimPreview = gesture?.kind === "trim" ? trimLinked(project, gesture.id, gesture.edge, gesture.time) : project;
   const displayClip = (clip: Clip) => {
-    if (gesture?.kind === "move" && gesture.ids.includes(clip.id))
+    if (gesture?.kind === "move" && gesture.ids.includes(clip.id)) {
+      const targetTrk = project.tracks.find((t) => t.id === gesture.targetTrackId);
+      const canMove = targetTrk ? canMoveToTrack(clip, targetTrk, project) : false;
       return {
         ...clip,
         start: Math.max(0, clip.start + gesture.delta),
         trackId:
-          gesture.targetTrackId !== gesture.trackId &&
-          canMoveToTrack(
-            clip,
-            project.tracks.find((t) => t.id === gesture.targetTrackId)!,
-            project,
-          )
+          gesture.targetTrackId !== gesture.trackId && canMove
             ? gesture.targetTrackId
             : clip.trackId,
       };
+    }
     if (gesture?.kind === "trim") return trimPreview.clips.find(c => c.id === clip.id) ?? clip;
     return clip;
   };
-  // Dynamic tracks: Hide empty placeholder tracks unless they have clips, are targeted, or matching media is dragged
-  const primaryVideoTrack = project.tracks.find((t) => t.kind === "video") ?? project.tracks[0];
+  // Dynamic tracks: Keep Video 1 and all video tracks visible, text/audio visible when containing media
+  const primaryVideoTrack = project.tracks.find((t) => t.name === "Video 1") ?? [...project.tracks].reverse().find((t) => t.kind === "video") ?? project.tracks[0];
   const visibleTracks = project.tracks.filter((track) => {
+    if (track.kind === "video") return true;
     if (track.id === primaryVideoTrack?.id) return true;
     if (project.clips.some((c) => c.trackId === track.id)) return true;
     if (dropTarget?.trackId === track.id) return true;
     if (trackActions?.id === track.id) return true;
     if (gesture?.kind === "move" && gesture.targetTrackId === track.id) return true;
-    if (draggedKind && (track.kind === draggedKind || (draggedKind === "image" && track.kind === "video"))) return true;
+    if (draggedKind && ((track.kind as string) === draggedKind || (draggedKind === "image" && (track.kind as string) === "video"))) return true;
     return false;
   });
-
 
   const moveClipVertically = (clip: Clip, direction: "up" | "down") => {
     const p = useEditorStore.getState().project;
@@ -350,36 +399,28 @@ export default function Timeline(props: TimelineProps) {
       if (upperTrack) {
         props.onMoveClips([clip.id], 0, upperTrack.id);
       } else {
-        const newTrack = {
-          id: "track-" + Math.random().toString(36).substring(2, 9),
-          name: `Video ${p.tracks.filter(t => t.kind === "video").length + 1}`,
-          kind: currentTrack.kind,
-          muted: false,
-          hidden: false,
-          locked: false,
-        };
+        const newTrack = createTrack(
+          currentTrack.kind,
+          `Video ${p.tracks.filter((t) => t.kind === "video").length + 1}`,
+        );
         const tracks = [...p.tracks];
         tracks.splice(currentIdx, 0, newTrack);
-        const clips = p.clips.map((c) => c.id === clip.id ? { ...c, trackId: newTrack.id } : c);
-        useEditorStore.getState().commit({ ...p, tracks, clips });
+        const clips = p.clips.map((c) => (c.id === clip.id ? { ...c, trackId: newTrack.id } : c));
+        useEditorStore.getState().commit(pruneEmptyOverlayTracks({ ...p, tracks, clips }));
       }
     } else {
       const lowerTrack = p.tracks.slice(currentIdx + 1).find((t) => t.kind === currentTrack.kind && !t.locked);
       if (lowerTrack) {
         props.onMoveClips([clip.id], 0, lowerTrack.id);
       } else {
-        const newTrack = {
-          id: "track-" + Math.random().toString(36).substring(2, 9),
-          name: `Video ${p.tracks.filter(t => t.kind === "video").length + 1}`,
-          kind: currentTrack.kind,
-          muted: false,
-          hidden: false,
-          locked: false,
-        };
+        const newTrack = createTrack(
+          currentTrack.kind,
+          `Video ${p.tracks.filter((t) => t.kind === "video").length + 1}`,
+        );
         const tracks = [...p.tracks];
-        tracks.splice(currentIdx + 1, 0, newTrack);
-        const clips = p.clips.map((c) => c.id === clip.id ? { ...c, trackId: newTrack.id } : c);
-        useEditorStore.getState().commit({ ...p, tracks, clips });
+        tracks.splice(currentIdx, 0, newTrack);
+        const clips = p.clips.map((c) => (c.id === clip.id ? { ...c, trackId: newTrack.id } : c));
+        useEditorStore.getState().commit(pruneEmptyOverlayTracks({ ...p, tracks, clips }));
       }
     }
   };
@@ -389,22 +430,31 @@ export default function Timeline(props: TimelineProps) {
     const currentIdx = p.tracks.findIndex((t) => t.id === clip.trackId);
     if (currentIdx < 0) return;
     const currentTrack = p.tracks[currentIdx];
-    const newTrack = {
-      id: "track-" + Math.random().toString(36).substring(2, 9),
-      name: `Video ${p.tracks.filter(t => t.kind === "video").length + 1}`,
-      kind: currentTrack.kind,
-      muted: false,
-      hidden: false,
-      locked: false,
-    };
+    const newTrack = createTrack(
+      currentTrack.kind,
+      `Video ${p.tracks.filter((t) => t.kind === "video").length + 1}`,
+    );
     const tracks = [...p.tracks];
+    // Overlay tracks ALWAYS sit ABOVE the current track (inserted at currentIdx)
     tracks.splice(currentIdx, 0, newTrack);
-    const clips = p.clips.map((c) => c.id === clip.id ? { ...c, trackId: newTrack.id } : c);
-    useEditorStore.getState().commit({ ...p, tracks, clips });
+    const clips = p.clips.map((c) => (c.id === clip.id ? { ...c, trackId: newTrack.id } : c));
+    useEditorStore.getState().commit(pruneEmptyOverlayTracks({ ...p, tracks, clips }));
   };
 
-  const clips = project.clips.map(displayClip);
-  let trackTop = 0;
+  const effectiveProjectClips = activeCompoundClip ? (activeCompoundClip.nestedClips || []) : project.clips;
+  const clips = effectiveProjectClips.map(displayClip);
+  const ADD_TRACK_HEIGHT = 55;
+  const availableHeight = Math.max(0, viewportHeight - RULER);
+  const rawTracksHeight = visibleTracks.reduce((acc, track) => {
+    const live = layoutTrackClips(clips.filter((c) => c.trackId === track.id));
+    return acc + live.height;
+  }, 0);
+  const totalTracksBlockHeight = rawTracksHeight + ADD_TRACK_HEIGHT;
+  const tracksOffsetY = totalTracksBlockHeight < availableHeight
+    ? Math.max(0, Math.floor((availableHeight - totalTracksBlockHeight) / 2))
+    : 0;
+
+  let trackTop = tracksOffsetY;
   const trackLayouts = visibleTracks.map((track) => {
     const live = layoutTrackClips(clips.filter((c) => c.trackId === track.id));
     const isAffectedByMove =
@@ -426,7 +476,7 @@ export default function Timeline(props: TimelineProps) {
     trackTop += layout.height;
     return result;
   });
-  const tracksHeight = trackTop;
+  const tracksHeight = trackTop - tracksOffsetY;
   const actionTrack = project.tracks.find(
     (track) => track.id === trackActions?.id,
   );
@@ -542,9 +592,13 @@ export default function Timeline(props: TimelineProps) {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(() => setViewportWidth(el.clientWidth));
+    const updateSize = () => {
+      setViewportWidth(el.clientWidth);
+      setViewportHeight(el.clientHeight);
+    };
+    const observer = new ResizeObserver(updateSize);
     observer.observe(el);
-    setViewportWidth(el.clientWidth);
+    updateSize();
     return () => observer.disconnect();
   }, []);
   const listenForGesture = (
@@ -582,8 +636,9 @@ export default function Timeline(props: TimelineProps) {
   };
   const targetTrack = (clientY: number) => {
     const y = locate(0, clientY).y;
+    if (y < 20 + tracksOffsetY && visibleTracks.length > 0) return visibleTracks[0];
     const index = trackLayouts.findIndex(
-      (layout) => y < layout.top + layout.height,
+      (layout) => y < layout.top + layout.height + 15,
     );
     return visibleTracks[index < 0 ? visibleTracks.length - 1 : index];
   };
@@ -663,6 +718,28 @@ export default function Timeline(props: TimelineProps) {
     else if (x < el.scrollLeft) el.scrollLeft = x;
   }, [playhead, pps, props.playing]);
 
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (
+        (e.target as HTMLElement)?.tagName === "INPUT" ||
+        (e.target as HTMLElement)?.tagName === "TEXTAREA"
+      ) {
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "[" || e.key === "]")) {
+        const primaryId = selectedIds[0];
+        if (primaryId) {
+          e.preventDefault();
+          useEditorStore
+            .getState()
+            .swapClipWithAdjacent(primaryId, e.key === "[" ? "prev" : "next");
+        }
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [selectedIds]);
+
   const startClip = (
     event: ReactPointerEvent,
     clip: Clip,
@@ -672,6 +749,8 @@ export default function Timeline(props: TimelineProps) {
     event.stopPropagation();
     event.preventDefault();
     (event.currentTarget as HTMLElement).focus({ preventScroll: true });
+    setSelectedGap(null);
+    setSelectedTransition(null);
     const track = project.tracks.find((t) => t.id === clip.trackId);
     if (track?.locked) return;
     if (activeTool === "razor" && !trim) {
@@ -756,16 +835,50 @@ export default function Timeline(props: TimelineProps) {
           adjusted = endSnap - clip.start;
         }
         adjusted = Math.max(-earliest, adjusted);
-        const candidate = targetTrack(e.clientY);
-        const compatible =
-          candidate && canMoveToTrack(clip, candidate, project);
+        const yLoc = locate(0, e.clientY).y;
+        const firstVideoLayout = trackLayouts.find((l) => {
+          const t = visibleTracks.find((tr) => tr.id === l.id);
+          return t?.kind === "video";
+        });
+        const clipAsset = project.assets.find(a => a.id === clip.assetId);
+        const isVideoClip = !clip.text && clipAsset?.kind !== "audio";
+        const isDraggingAboveVideo =
+          isVideoClip &&
+          Boolean(firstVideoLayout) &&
+          yLoc < (firstVideoLayout?.top ?? 0);
+
+        let targetTrackId: string;
+        let isNewTrack = false;
+        if (isDraggingAboveVideo) {
+          targetTrackId = "new-overlay-track";
+          isNewTrack = true;
+        } else {
+          const candidate = targetTrack(e.clientY);
+          const compatible = candidate && canMoveToTrack(clip, candidate, project);
+          targetTrackId = compatible ? candidate.id : clip.trackId;
+        }
+
+        const isMain = !isNewTrack && targetTrackId === primaryVideoTrack?.id;
+        let insertSlot: { insertTime: number; insertIndex: number } | undefined;
+        if (isMain) {
+          const targetClips = project.clips.filter((c) => c.trackId === targetTrackId);
+          insertSlot = calculateInsertionSlot(
+            clip.start + adjusted,
+            targetClips,
+            clip.id,
+          );
+        }
+
         setActiveGesture({
           kind: "move",
           ids: movable,
           delta: snapToFrame(adjusted, project.fps),
           primaryId: clip.id,
           trackId: clip.trackId,
-          targetTrackId: compatible ? candidate.id : clip.trackId,
+          targetTrackId,
+          pointerX: e.clientX,
+          pointerY: e.clientY,
+          insertSlot,
         });
       }
     };
@@ -773,13 +886,49 @@ export default function Timeline(props: TimelineProps) {
       const g = gestureRef.current;
       if (
         g?.kind === "move" &&
-        (Math.abs(g.delta) > 0.001 || g.targetTrackId !== g.trackId)
-      )
-        props.onMoveClips(
-          g.ids,
-          g.delta,
-          g.targetTrackId !== g.trackId ? g.targetTrackId : undefined,
-        );
+        (Math.abs(g.delta) > 0.001 || g.targetTrackId !== g.trackId || g.insertSlot || g.targetTrackId === "new-overlay-track")
+      ) {
+        if (g.targetTrackId === "new-overlay-track") {
+          const p = useEditorStore.getState().project;
+          const firstVideoIdx = p.tracks.findIndex((t) => t.kind === "video");
+          const newTrack = createTrack(
+            "video",
+            `Video ${p.tracks.filter((t) => t.kind === "video").length + 1}`,
+          );
+          const tracks = [...p.tracks];
+          tracks.splice(firstVideoIdx >= 0 ? firstVideoIdx : 0, 0, newTrack);
+          const clips = p.clips.map((c) => {
+            if (!g.ids.includes(c.id)) return c;
+            const isAudio = p.assets.find((a) => a.id === c.assetId)?.kind === "audio" ||
+              p.tracks.find((t) => t.id === c.trackId)?.kind === "audio";
+            const targetTrackForClip = isAudio ? c.trackId : newTrack.id;
+            return {
+              ...c,
+              trackId: targetTrackForClip,
+              start: snapToFrame(Math.max(0, c.start + g.delta), p.fps),
+            };
+          });
+          useEditorStore.getState().commit(pruneEmptyOverlayTracks({ ...p, tracks, clips }));
+        } else {
+          const isMain = g.targetTrackId === primaryVideoTrack?.id;
+          if (isMain && g.insertSlot) {
+            useEditorStore
+              .getState()
+              .reorderClip(
+                g.primaryId,
+                g.targetTrackId,
+                g.insertSlot.insertTime,
+                "insert",
+              );
+          } else {
+            props.onMoveClips(
+              g.ids,
+              g.delta,
+              g.targetTrackId !== g.trackId ? g.targetTrackId : undefined,
+            );
+          }
+        }
+      }
       if (g?.kind === "trim") props.onTrim(g.id, g.edge, g.time);
       setActiveGesture(null);
       setSnapLine(null);
@@ -801,6 +950,7 @@ export default function Timeline(props: TimelineProps) {
   const startSelection = (event: ReactPointerEvent) => {
     if (event.button !== 0) return;
     setSelectedGap(null);
+    setSelectedTransition(null);
     const start = locate(event.clientX, event.clientY);
     const additive = event.shiftKey || event.metaKey || event.ctrlKey;
     const previous = additive ? selectedIds : [];
@@ -857,6 +1007,38 @@ export default function Timeline(props: TimelineProps) {
   const onDrop = (event: React.DragEvent, track: Track) => {
     event.preventDefault();
     setDropTarget(null);
+    const isTextDrag =
+      event.dataTransfer.types.includes("application/x-gocut-text") ||
+      event.dataTransfer.types.includes("application/x-reacut-text");
+    if (isTextDrag && !track.locked) {
+      const raw =
+        event.dataTransfer.getData("application/x-gocut-text") ||
+        event.dataTransfer.getData("application/x-reacut-text");
+      if (raw) {
+        try {
+          const preset: TextPreset = JSON.parse(raw);
+          const dropTime = Math.max(0, locate(event.clientX, event.clientY).x / pps);
+          const p = useEditorStore.getState().project;
+          let targetTrack = p.tracks.find((t) => t.kind === "text" && !t.locked);
+          let tracks = [...p.tracks];
+          if (!targetTrack) {
+            targetTrack = createTrack("text", "Text 1");
+            tracks = [targetTrack, ...tracks];
+          }
+          const textClip = createClip(undefined, targetTrack.id, dropTime, p.fps);
+          textClip.name = preset.name;
+          textClip.duration = 3;
+          textClip.text = { ...textClip.text!, ...preset.style };
+          useEditorStore.getState().commit({
+            ...p,
+            tracks,
+            clips: [...p.clips, textClip],
+          });
+          onSelect([textClip.id]);
+        } catch {}
+      }
+      return;
+    }
     const isTransitionDrag =
       event.dataTransfer.types.includes("application/x-reacut-transition") ||
       event.dataTransfer.types.includes("application/x-gocut-transition");
@@ -1199,6 +1381,27 @@ export default function Timeline(props: TimelineProps) {
           }}
           onDropCapture={() => setDraggedKind(null)}
         >
+          {nestedTimelineScope && activeCompoundClip && (
+            <div className="tl-subtimeline-banner">
+              <button
+                className="tl-subtimeline-btn"
+                onClick={() => exitCompoundClip()}
+                title="Kembali ke Timeline Utama"
+              >
+                🏠 {t("timeline.main")}
+              </button>
+              <span className="tl-subtimeline-sep">›</span>
+              <span className="tl-subtimeline-current">
+                📦 {activeCompoundClip.name || "Klip Bersarang"}
+              </span>
+              <button
+                className="tl-subtimeline-exit"
+                onClick={() => exitCompoundClip()}
+              >
+                ← Keluar dari Sub-Timeline
+              </button>
+            </div>
+          )}
           <div className="tl-ruler" style={{ height: RULER }}>
             <div className="tl-ruler-label">
               {t("timeline.main")} <span>{project.fps} FPS</span>
@@ -1260,7 +1463,15 @@ export default function Timeline(props: TimelineProps) {
             </div>
           </div>
           <div
-            className={`tl-new-track-dropzone ${dropTarget?.trackId === "new-video-track" ? "is-active" : ""}`}
+            className="tl-tracks-container"
+            style={{
+              paddingTop: tracksOffsetY,
+              minHeight: availableHeight,
+              boxSizing: "border-box",
+            }}
+          >
+            <div
+              className={`tl-new-track-dropzone ${dropTarget?.trackId === "new-video-track" || (gesture?.kind === "move" && gesture.targetTrackId === "new-overlay-track") ? "is-active" : ""}`}
             onDragOver={(event) => {
               if (event.dataTransfer.types.includes("application/x-reacut-transition") || event.dataTransfer.types.includes("application/x-gocut-transition")) return;
               const id =
@@ -1287,16 +1498,16 @@ export default function Timeline(props: TimelineProps) {
             }}
             onDrop={onDropNewTrack}
           >
-            {dropTarget?.trackId === "new-video-track" && (
+            {(dropTarget?.trackId === "new-video-track" || (gesture?.kind === "move" && gesture.targetTrackId === "new-overlay-track")) && (
               <div className="tl-new-track-hint">
                 <Plus size={14} />
-                <span>+ New Overlay Video Track</span>
+                <span>+ Trek Video Overlay Baru (Di Atas)</span>
               </div>
             )}
           </div>
           {visibleTracks.map((track, index) => (
             <div
-              className={`tl-track tl-track-${track.kind} ${track.locked ? "is-locked" : ""} ${dropTarget?.trackId === track.id ? "is-drop-target" : ""}`}
+              className={`tl-track tl-track-${track.kind} ${track.locked ? "is-locked" : ""} ${dropTarget?.trackId === track.id ? "is-drop-target" : ""} ${gesture?.kind === "move" && gesture.targetTrackId === track.id ? "is-drag-target" : ""}`}
               key={track.id}
               data-track-id={track.id}
               style={{ height: trackLayouts[index].height }}
@@ -1481,6 +1692,13 @@ export default function Timeline(props: TimelineProps) {
                     }
                     return;
                   }
+                  if (event.dataTransfer.types.includes("application/x-reacut-text") || event.dataTransfer.types.includes("application/x-gocut-text")) {
+                    if (!track.locked) {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
+                    }
+                    return;
+                  }
                   const id =
                     event.dataTransfer.types.includes(ASSET_DRAG_TYPE) ||
                     event.dataTransfer.types.includes("assetid");
@@ -1519,6 +1737,17 @@ export default function Timeline(props: TimelineProps) {
                 }}
                 onDrop={(event) => onDrop(event, track)}
               >
+                {/* Vertical Insertion Beam Indicator */}
+                {gesture?.kind === "move" &&
+                  gesture.targetTrackId === track.id &&
+                  gesture.insertSlot && (
+                    <div
+                      className="tl-insertion-beam"
+                      style={{
+                        left: gesture.insertSlot.insertTime * pps,
+                      }}
+                    />
+                  )}
                 
                 {/* CapCut-style Transition Seam Badges (Non-stacking) */}
                 {clips
@@ -1527,13 +1756,20 @@ export default function Timeline(props: TimelineProps) {
                     const prev = trackClips[ci - 1];
                     const hasTransition =
                       prev &&
-                      (clip.fadeIn > 0 || prev.fadeOut > 0) &&
+                      (clip.fadeIn > 0 || prev.fadeOut > 0 || (clip.start < prev.start + prev.duration && prev.start + prev.duration - clip.start > 0.05)) &&
                       clip.start <= prev.start + prev.duration + 0.01 &&
-                      clip.start >= prev.start + prev.duration - 4;
+                      clip.start >= prev.start + prev.duration - 5;
                     if (!hasTransition) return null;
-                    const transitionWidth = Math.max(26, Math.min(80, (prev.start + prev.duration - clip.start) * pps));
-                    const seamTime = prev.start + prev.duration;
-                    const transitionLeft = seamTime * pps - transitionWidth / 2;
+                    const overlap = Math.max(0, prev.start + prev.duration - clip.start);
+                    const transDuration = Math.max(
+                      0.1,
+                      clip.fadeIn || 0,
+                      prev.fadeOut || 0,
+                      overlap
+                    );
+                    const transitionWidth = Math.max(20, transDuration * pps);
+                    const seamTime = overlap > 0 ? clip.start + overlap / 2 : clip.start;
+                    const transitionLeft = Math.max(0, seamTime * pps - transitionWidth / 2);
                     const isSelected = selectedTransition === clip.id;
                     return (
                       <div
@@ -1542,14 +1778,35 @@ export default function Timeline(props: TimelineProps) {
                         style={{
                           left: transitionLeft,
                           width: transitionWidth,
-                          top: 8 + (trackLayouts[index].lanes.get(clip.id) ?? 0) * 62,
+                          top: 8,
                           height: 54,
                         }}
-                        title={`Transisi: ${(prev.start + prev.duration - clip.start).toFixed(2)}s · Klik untuk memilih, Tekan Del untuk menghapus`}
+                        title={`Transisi: ${transDuration.toFixed(2)}s · Klik untuk memilih, Tekan Del untuk menghapus`}
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedTransition(clip.id);
                           onSelect([clip.id]);
+                        }}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setSelectedTransition(clip.id);
+                          setContextMenu({
+                            x: e.clientX,
+                            y: e.clientY,
+                            items: [
+                              {
+                                label: t("toolbar.delete") || "Hapus Transisi",
+                                icon: <Trash2 size={14} />,
+                                shortcut: "Backspace",
+                                danger: true,
+                                onClick: () => {
+                                  useEditorStore.getState().removeTransition(clip.id);
+                                  setSelectedTransition(null);
+                                },
+                              },
+                            ],
+                          });
                         }}
                       >
                         <div className="tl-transition-center-seam" />
@@ -1597,11 +1854,65 @@ export default function Timeline(props: TimelineProps) {
                       <div
                         key={clip.id}
                         data-clip-id={clip.id}
-                        className={`tl-clip tl-clip-${track.kind} ${selected ? "is-selected" : ""} ${dragging ? "is-dragging" : ""} ${track.hidden ? "is-hidden" : ""} ${asset?.missing ? "is-missing" : ""} ${clip.isCompound ? "tl-clip-compound" : ""}`}
+                        className={`tl-clip tl-clip-${track.kind} ${selected ? "is-selected" : ""} ${dragging ? "is-dragging is-drag-source-ghost" : ""} ${track.hidden ? "is-hidden" : ""} ${asset?.missing ? "is-missing" : ""} ${clip.isCompound ? "tl-clip-compound" : ""}`}
+                        onDoubleClick={(e) => {
+                          e.stopPropagation();
+                          if (clip.isCompound) {
+                            enterCompoundClip(clip.id);
+                          } else {
+                            onSeek(clip.start);
+                          }
+                        }}
+                        onDragOver={(e) => {
+                          if (
+                            e.dataTransfer.types.includes("application/x-gocut-effect") ||
+                            e.dataTransfer.types.includes("application/x-reacut-effect") ||
+                            e.dataTransfer.types.includes("application/x-gocut-motion") ||
+                            e.dataTransfer.types.includes("application/x-reacut-motion")
+                          ) {
+                            if (!track.locked) {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              e.dataTransfer.dropEffect = "copy";
+                            }
+                          }
+                        }}
+                        onDrop={(e) => {
+                          if (
+                            e.dataTransfer.types.includes("application/x-gocut-effect") ||
+                            e.dataTransfer.types.includes("application/x-reacut-effect")
+                          ) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const raw = e.dataTransfer.getData("application/x-gocut-effect") || e.dataTransfer.getData("application/x-reacut-effect");
+                            if (raw) {
+                              try {
+                                const adjustments = JSON.parse(raw);
+                                props.onClipUpdate(clip.id, { adjustments: { ...clip.adjustments, ...adjustments } });
+                              } catch {}
+                            }
+                            return;
+                          }
+                          if (
+                            e.dataTransfer.types.includes("application/x-gocut-motion") ||
+                            e.dataTransfer.types.includes("application/x-reacut-motion")
+                          ) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const motionId = e.dataTransfer.getData("application/x-gocut-motion") || e.dataTransfer.getData("application/x-reacut-motion");
+                            if (motionId) {
+                              const patch = motionPatch(clip, motionId as MotionId, project);
+                              props.onClipUpdate(clip.id, patch);
+                            }
+                            return;
+                          }
+                        }}
                         onContextMenu={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
                           onSelect([clip.id]);
+                          const canSeparate = track.kind === "video" && (asset?.hasAudio || asset?.kind === "audio") && !clip.linkId;
+                          const canRecover = !!clip.linkId;
                           const items: ContextMenuItem[] = [
                             {
                               label: t("toolbar.split") || "Split",
@@ -1626,6 +1937,43 @@ export default function Timeline(props: TimelineProps) {
                               disabled: track.locked,
                               onClick: () => useEditorStore.getState().duplicate(),
                             },
+                            { divider: true, label: "", onClick: () => {} },
+                            ...(canSeparate ? [
+                              {
+                                label: "Pisahkan Audio",
+                                icon: <AudioLines size={14} />,
+                                disabled: track.locked,
+                                onClick: () => separateAudio(clip.id),
+                              },
+                            ] : []),
+                            ...(canRecover ? [
+                              {
+                                label: "Pulihkan Audio Asal",
+                                icon: <Volume2 size={14} />,
+                                disabled: track.locked,
+                                onClick: () => recoverAudio(clip.id),
+                              },
+                            ] : []),
+                            ...(clip.isCompound ? [
+                              {
+                                label: "Buka Klip Bersarang (Masuk Sub-Timeline)",
+                                icon: <Layers size={14} />,
+                                onClick: () => enterCompoundClip(clip.id),
+                              },
+                              {
+                                label: "Pisahkan Klip Bersarang (Ungroup)",
+                                icon: <Scissors size={14} />,
+                                disabled: track.locked,
+                                onClick: () => ungroupCompoundClip(clip.id),
+                              },
+                            ] : selectedIds.length >= 2 ? [
+                              {
+                                label: "Buat Klip Bersarang (Compound Clip)",
+                                icon: <Layers size={14} />,
+                                disabled: track.locked,
+                                onClick: () => useEditorStore.getState().createCompoundClip(selectedIds),
+                              },
+                            ] : []),
                             { divider: true, label: "", onClick: () => {} },
                             {
                               label: "Pindah ke Trek Video Atas",
@@ -1702,7 +2050,6 @@ export default function Timeline(props: TimelineProps) {
                             (trackLayouts[index].lanes.get(clip.id) ?? 0) * 62,
                         }}
                         onPointerDown={(event) => startClip(event, original)}
-                        onDoubleClick={() => onSeek(clip.start)}
                         title={`${clip.name}\n${formatTimelineTime(clip.start, project.fps)} · ${clip.duration.toFixed(2)}s${track.locked ? `\n${t("timeline.trackLocked")}` : ""}`}
                         tabIndex={0}
                         role="button"
@@ -1739,6 +2086,19 @@ export default function Timeline(props: TimelineProps) {
                                 (event.shiftKey ? 10 : 1)) /
                                 project.fps,
                             );
+                          }
+                          if (
+                            (event.ctrlKey || event.metaKey) &&
+                            (event.key === "[" || event.key === "]")
+                          ) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            useEditorStore
+                              .getState()
+                              .swapClipWithAdjacent(
+                                clip.id,
+                                event.key === "[" ? "prev" : "next",
+                              );
                           }
                         }}
                       >
@@ -1940,27 +2300,28 @@ export default function Timeline(props: TimelineProps) {
               </span>
             )}
           </div>
+        </div>
+        <div
+          className="tl-playhead"
+          style={{
+            left: GUTTER + playhead * pps,
+            top: RULER,
+            height: Math.max(availableHeight, tracksHeight + tracksOffsetY + ADD_TRACK_HEIGHT),
+          }}
+        >
+          <div className="tl-playhead-hitbox" onPointerDown={scrub} />
+          <i />
+        </div>
+        {snapLine !== null && (
           <div
-            className="tl-playhead"
+            className="tl-snap-line"
             style={{
-              left: GUTTER + playhead * pps,
+              left: GUTTER + snapLine * pps,
               top: RULER,
-              height: Math.max(tracksHeight, ROW),
+              height: Math.max(availableHeight, tracksHeight + tracksOffsetY + ADD_TRACK_HEIGHT),
             }}
-          >
-            <div className="tl-playhead-hitbox" onPointerDown={scrub} />
-            <i />
-          </div>
-          {snapLine !== null && (
-            <div
-              className="tl-snap-line"
-              style={{
-                left: GUTTER + snapLine * pps,
-                top: RULER,
-                height: tracksHeight,
-              }}
-            />
-          )}
+          />
+        )}
           {gesture?.kind === "marquee" && (
             <div
               className="tl-marquee"
@@ -2129,6 +2490,68 @@ export default function Timeline(props: TimelineProps) {
           onClose={() => setContextMenu(null)}
         />
       )}
+      {gesture?.kind === "move" &&
+        gesture.pointerX !== undefined &&
+        gesture.pointerY !== undefined && (() => {
+          const primaryClip = project.clips.find((c) => c.id === gesture.primaryId);
+          const primaryTrack = primaryClip ? project.tracks.find((t) => t.id === primaryClip.trackId) : undefined;
+          const primaryAsset = primaryClip ? project.assets.find((a) => a.id === primaryClip.assetId) : undefined;
+          const clipKind = primaryTrack?.kind ?? (primaryAsset?.kind === "audio" ? "audio" : primaryClip?.text ? "text" : "video");
+
+          return (
+            <div
+              className={`tl-floating-drag-item tl-floating-drag-${clipKind} ${primaryAsset?.thumbnail ? "has-thumb" : ""}`}
+              style={{
+                left: gesture.pointerX,
+                top: gesture.pointerY,
+              }}
+            >
+              {primaryAsset?.thumbnail && clipKind !== "audio" ? (
+                <div className="tl-floating-drag-thumb-wrapper">
+                  <img
+                    src={primaryAsset.thumbnail}
+                    alt=""
+                    className="tl-floating-drag-thumb"
+                  />
+                  <div className="tl-floating-drag-badge">
+                    <Film size={10} />
+                  </div>
+                </div>
+              ) : (
+                <div className={`tl-floating-drag-icon tl-floating-drag-icon-${clipKind}`}>
+                  {clipKind === "audio" ? (
+                    <AudioLines size={14} />
+                  ) : clipKind === "text" ? (
+                    <Type size={14} />
+                  ) : (
+                    <Film size={14} />
+                  )}
+                </div>
+              )}
+              <div className="tl-floating-drag-info">
+                <div className="tl-floating-drag-title-row">
+                  {primaryClip?.linkId && (
+                    <Link2 size={11} className="tl-floating-drag-link" />
+                  )}
+                  <span className="tl-floating-drag-name">
+                    {primaryClip?.name ?? "Clip"}
+                  </span>
+                  {gesture.ids.length > 1 && (
+                    <span className="tl-floating-drag-count">
+                      +{gesture.ids.length - 1}
+                    </span>
+                  )}
+                </div>
+                <span className="tl-floating-drag-duration">
+                  {formatTimelineTime(
+                    primaryClip?.duration ?? 0,
+                    project.fps,
+                  )}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
     </section>
   );
 }

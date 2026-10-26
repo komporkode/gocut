@@ -15,8 +15,8 @@ import {
   snapToFrame,
   validateProject,
 } from "../core/model";
-import { linkedIds, moveLinked, speedLinked, slipLinked, placeAsset, trimLinked, splitLinked, unlinkClips, rippleTrim, closeGap, setClipSpeed, createCompoundClip, ungroupCompoundClip, rippleSnapTrack, rippleSnapAllTracks, type PlacementMode } from "../core/timelineEdits";
-import { applyTransition, type TransitionId } from "../core/creativePresets";
+import { linkedIds, moveLinked, speedLinked, slipLinked, placeAsset, trimLinked, splitLinked, unlinkClips, rippleTrim, closeGap, setClipSpeed, createCompoundClip, ungroupCompoundClip, rippleSnapTrack, rippleSnapAllTracks, reorderClip, swapClips, separateAudio, recoverAudio, type PlacementMode } from "../core/timelineEdits";
+import { applyTransition, removeTransition, type TransitionId } from "../core/creativePresets";
 import type { Subtitle } from "../core/subtitles";
 interface EditorState {
   project: Project;
@@ -28,6 +28,7 @@ interface EditorState {
   snapping: boolean;
   magnetic: boolean;
   activeTool: "select" | "razor";
+  nestedTimelineScope: string | null;
   setActiveTool: (tool: "select" | "razor") => void;
   dirty: boolean;
   revisionId: number;
@@ -52,6 +53,13 @@ interface EditorState {
   updateClip: (clipId: string, patch: Partial<Clip>) => void;
   updateSelected: (patch: Partial<Clip>) => void;
   moveClips: (ids: string[], delta: number, trackId?: string) => void;
+  reorderClip: (
+    clipId: string,
+    targetTrackId: string,
+    targetTime: number,
+    mode?: "insert" | "swap" | "overwrite",
+  ) => void;
+  swapClipWithAdjacent: (clipId: string, direction: "prev" | "next") => void;
   trim: (clipId: string, edge: "start" | "end", time: number) => void;
   split: () => void;
   splitAt: (clipId: string, time: number) => void;
@@ -59,8 +67,13 @@ interface EditorState {
   closeGap: (trackId: string, atTime: number) => void;
   setClipSpeed: (clipId: string, speed: number, ripple?: boolean) => void;
   applyTransition: (clipId: string, transition: TransitionId, seconds?: number) => void;
+  removeTransition: (clipId: string) => void;
   createCompoundClip: (clipIds?: string[]) => void;
   ungroupCompoundClip: (compoundClipId?: string) => void;
+  enterCompoundClip: (clipId: string) => void;
+  exitCompoundClip: () => void;
+  separateAudio: (clipId: string) => void;
+  recoverAudio: (clipId: string) => void;
   deleteSelected: () => void;
   duplicate: () => void;
   copy: () => void;
@@ -105,8 +118,25 @@ function patchClip(
   patch: Partial<Clip>,
 ): Project {
   let p = project;
-  const original = p.clips.find((c) => c.id === clipId);
-  if (!original || !editable(p, original)) return p;
+  let original = p.clips.find((c) => c.id === clipId);
+  if (!original) {
+    const compound = p.clips.find(
+      (c) => c.isCompound && c.nestedClips?.some((nc) => nc.id === clipId),
+    );
+    if (compound && compound.nestedClips) {
+      const updatedNested = compound.nestedClips.map((nc) =>
+        nc.id === clipId ? { ...nc, ...clone(patch) } : nc,
+      );
+      return {
+        ...p,
+        clips: p.clips.map((c) =>
+          c.id === compound.id ? { ...c, nestedClips: updatedNested } : c,
+        ),
+      };
+    }
+    return p;
+  }
+  if (!editable(p, original)) return p;
   const rest = { ...clone(patch) };
   delete rest.id;
   if (rest.trackId !== undefined) {
@@ -290,6 +320,55 @@ export function isProjectEqual(a: Project, b: Project): boolean {
   return true;
 }
 
+export function pruneEmptyOverlayTracks(project: Project): Project {
+  const primaryVideoTrack =
+    project.tracks.find((t) => t.name === "Video 1") ??
+    [...project.tracks].reverse().find((t) => t.kind === "video");
+
+  if (!primaryVideoTrack) return project;
+
+  // An overlay video track is any video track other than the primary video track.
+  // It is empty if no clip in project has clip.trackId === track.id.
+  const emptyOverlayTracks = project.tracks.filter(
+    (t) =>
+      t.kind === "video" &&
+      t.id !== primaryVideoTrack.id &&
+      !project.clips.some((c) => c.trackId === t.id),
+  );
+
+  if (emptyOverlayTracks.length === 0) return project;
+
+  const emptyTrackIds = new Set(emptyOverlayTracks.map((t) => t.id));
+  const remainingTracks = project.tracks.filter((t) => !emptyTrackIds.has(t.id));
+
+  // Re-index video track names cleanly
+  const videoTracks = remainingTracks.filter((t) => t.kind === "video");
+  const n = videoTracks.length;
+
+  const updatedTracks = remainingTracks.map((t) => {
+    if (t.kind !== "video") return t;
+    const i = videoTracks.findIndex((vt) => vt.id === t.id);
+    if (i < 0) return t;
+    const standardNamePattern = /^(?:画面|视频|Video|Trek Video)\s*\d+$/i;
+    if (t.id === primaryVideoTrack.id) {
+      if (standardNamePattern.test(t.name) || t.name === "Video 1") {
+        return { ...t, name: "Video 1" };
+      }
+      return t;
+    }
+    const expectedName = `Video ${n - i}`;
+    if (standardNamePattern.test(t.name)) {
+      return { ...t, name: expectedName };
+    }
+    return t;
+  });
+
+  return {
+    ...project,
+    tracks: updatedTracks,
+  };
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   project: createProject(),
   selectedIds: [],
@@ -299,6 +378,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   snapping: true,
   magnetic: false,
   activeTool: "select",
+  nestedTimelineScope: null,
   setActiveTool: (tool) => set({ activeTool: tool }),
   dirty: false,
   revisionId: 0,
@@ -318,6 +398,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       project: validateProject(project),
       path,
       selectedIds: [],
+      nestedTimelineScope: null,
       playhead: 0,
       playing: false,
       dirty: false,
@@ -494,8 +575,40 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   moveClips: (ids, delta, trackId) => {
     let next = moveLinked(get().project, ids, delta, trackId);
     if (get().magnetic) {
-      next = rippleSnapAllTracks(next);
+      const mainTrack = next.tracks.find(t => t.name === "Video 1") ?? next.tracks.find(t => t.kind === "video");
+      if (mainTrack) {
+        next = rippleSnapTrack(next, mainTrack.id);
+      }
     }
+    next = pruneEmptyOverlayTracks(next);
+    get().commit(next);
+  },
+  reorderClip: (clipId, targetTrackId, targetTime, mode = "insert") => {
+    let next = reorderClip(
+      get().project,
+      clipId,
+      targetTrackId,
+      targetTime,
+      mode,
+    );
+    if (get().magnetic) {
+      const mainTrack = next.tracks.find(t => t.name === "Video 1") ?? next.tracks.find(t => t.kind === "video");
+      if (mainTrack) {
+        next = rippleSnapTrack(next, mainTrack.id);
+      }
+    }
+    next = pruneEmptyOverlayTracks(next);
+    get().commit(next);
+  },
+  swapClipWithAdjacent: (clipId, direction) => {
+    let next = swapClips(get().project, clipId, direction);
+    if (get().magnetic) {
+      const mainTrack = next.tracks.find(t => t.name === "Video 1") ?? next.tracks.find(t => t.kind === "video");
+      if (mainTrack) {
+        next = rippleSnapTrack(next, mainTrack.id);
+      }
+    }
+    next = pruneEmptyOverlayTracks(next);
     get().commit(next);
   },
   trim: (clipId, edge, time) => {
@@ -539,8 +652,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     get().commit(next);
   },
   applyTransition: (clipId, transition, seconds = 0.5) => {
-    const next = applyTransition(get().project, clipId, transition, seconds);
+    const next = applyTransition(get().project, clipId, transition, seconds, true);
     get().commit(next.project);
+  },
+  removeTransition: (clipId) => {
+    const next = removeTransition(get().project, clipId);
+    get().commit(next);
   },
   createCompoundClip: (clipIds) => {
     const ids = clipIds && clipIds.length ? clipIds : get().selectedIds;
@@ -560,6 +677,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const next = ungroupCompoundClip(get().project, targetId);
     get().commit(next);
     set({ selectedIds: [] });
+  },
+  enterCompoundClip: (clipId) => {
+    set({ nestedTimelineScope: clipId, selectedIds: [] });
+  },
+  exitCompoundClip: () => {
+    set({ nestedTimelineScope: null, selectedIds: [] });
+  },
+  separateAudio: (clipId) => {
+    try {
+      const result = separateAudio(get().project, clipId);
+      get().commit(result.project);
+      set({ selectedIds: [clipId] });
+    } catch (e) {
+      console.error("separateAudio error:", e);
+    }
+  },
+  recoverAudio: (clipId) => {
+    try {
+      const next = recoverAudio(get().project, clipId);
+      get().commit(next);
+      set({ selectedIds: [clipId] });
+    } catch (e) {
+      console.error("recoverAudio error:", e);
+    }
   },
   deleteSelected: () => {
     const s = get(),
@@ -603,7 +744,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         offsets.set(c.linkId, delta);
       }
     }
-    get().commit({ ...p, clips });
+    const nextProject = pruneEmptyOverlayTracks({ ...p, clips });
+    get().commit(nextProject);
     set({
       selectedIds: s.selectedIds.filter(
         (selected) => !removed.some((c) => c.id === selected),
@@ -665,14 +807,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   addTrack: (kind) => {
     const p = get().project,
-      track = createTrack(
-        kind,
-        `${{ video: "Video", image: "Video", audio: "Audio", text: "Text" }[kind]} ${p.tracks.filter((t) => t.kind === kind).length + 1}`,
-      );
-    get().commit({
-      ...p,
-      tracks: kind === "audio" ? [...p.tracks, track] : [track, ...p.tracks],
-    });
+      count = p.tracks.filter((t) => t.kind === kind).length + 1,
+      name = `${{ video: "Video", image: "Video", audio: "Audio", text: "Text" }[kind]} ${count}`,
+      track = createTrack(kind, name);
+    let tracks: Track[];
+    if (kind === "audio") {
+      tracks = [...p.tracks, track];
+    } else if (kind === "video") {
+      const firstVideoIdx = p.tracks.findIndex((t) => t.kind === "video");
+      tracks = [...p.tracks];
+      tracks.splice(firstVideoIdx >= 0 ? firstVideoIdx : 0, 0, track);
+    } else {
+      tracks = [track, ...p.tracks];
+    }
+    get().commit({ ...p, tracks });
   },
   deleteTrack: (trackId) => {
     const s = get(),

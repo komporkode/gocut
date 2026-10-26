@@ -233,4 +233,126 @@ describe("track management", () => {
       locked: false,
     });
   });
+  it("reorders clips in store with undo and redo history", () => {
+    const p = state().project;
+    const c1 = p.clips[0];
+    const c2 = { ...structuredClone(c1), id: "c2", start: 3, duration: 4 };
+    state().commit({ ...p, clips: [c1, c2] });
+
+    state().reorderClip(c1.id, p.tracks[1].id, 5, "insert");
+    expect(state().project.clips.map((c) => c.id)).toEqual(["c2", c1.id]);
+    expect(state().past.length).toBeGreaterThan(0);
+
+    state().undo();
+    expect(state().project.clips.map((c) => c.id)).toEqual([c1.id, "c2"]);
+
+    state().redo();
+    expect(state().project.clips.map((c) => c.id)).toEqual(["c2", c1.id]);
+  });
+  it("swaps clip with adjacent clip in store with swapClipWithAdjacent", () => {
+    const p = state().project;
+    const c1 = p.clips[0];
+    const c2 = { ...structuredClone(c1), id: "c2", start: 3, duration: 4 };
+    state().commit({ ...p, clips: [c1, c2] });
+
+    state().swapClipWithAdjacent(c1.id, "next");
+    expect(state().project.clips.map((c) => c.id)).toEqual(["c2", c1.id]);
+
+    state().swapClipWithAdjacent(c1.id, "prev");
+    expect(state().project.clips.map((c) => c.id)).toEqual([c1.id, "c2"]);
+  });
+
+  it("addTrack('video') inserts overlay track above Video 1", () => {
+    state().addTrack("video");
+    const tracks = state().project.tracks;
+    const v1Index = tracks.findIndex((t) => t.name === "Video 1");
+    const newVideoIndex = tracks.findIndex((t) => t.name === "Video 2");
+    expect(newVideoIndex).toBeLessThan(v1Index);
+  });
+
+  it("magnetic mode preserves overlay track clip timing without forcing 0s snap", () => {
+    state().addTrack("video");
+    const newTrack = state().project.tracks.find((t) => t.name === "Video 2")!;
+    const p = state().project;
+    const c1 = p.clips[0];
+    const overlayClip = { ...structuredClone(c1), id: "overlay-1", trackId: newTrack.id, start: 8, duration: 2 };
+    state().commit({ ...p, clips: [c1, overlayClip] });
+
+    state().setMagnetic(true);
+    state().moveClips(["overlay-1"], 2, newTrack.id);
+
+    const updatedOverlay = state().project.clips.find((c) => c.id === "overlay-1");
+    expect(updatedOverlay?.start).toBe(10);
+  });
+
+  it("auto-prunes empty overlay video tracks when clip moves to another track", () => {
+    state().addTrack("video");
+    const v2Track = state().project.tracks.find((t) => t.name === "Video 2")!;
+    const v1Track = state().project.tracks.find((t) => t.name === "Video 1")!;
+    const p = state().project;
+    const c1 = p.clips[0];
+    const overlayClip = { ...structuredClone(c1), id: "overlay-1", trackId: v2Track.id, start: 5, duration: 2 };
+    state().commit({ ...p, clips: [c1, overlayClip] });
+
+    expect(state().project.tracks.some((t) => t.id === v2Track.id)).toBe(true);
+
+    // Move overlay clip down to Video 1
+    state().moveClips(["overlay-1"], 0, v1Track.id);
+
+    // Video 2 should now be pruned automatically
+    expect(state().project.tracks.some((t) => t.id === v2Track.id)).toBe(false);
+    expect(state().project.tracks.some((t) => t.name === "Video 1")).toBe(true);
+
+    // 1x Undo restores both clip and the overlay track
+    state().undo();
+    expect(state().project.tracks.some((t) => t.id === v2Track.id)).toBe(true);
+    expect(state().project.clips.find((c) => c.id === "overlay-1")?.trackId).toBe(v2Track.id);
+  });
+
+  it("auto-prunes empty overlay video tracks when clip on overlay is deleted", () => {
+    state().addTrack("video");
+    const v2Track = state().project.tracks.find((t) => t.name === "Video 2")!;
+    const p = state().project;
+    const c1 = p.clips[0];
+    const overlayClip = { ...structuredClone(c1), id: "overlay-delete", trackId: v2Track.id, start: 5, duration: 2 };
+    state().commit({ ...p, clips: [c1, overlayClip] });
+
+    state().select(["overlay-delete"]);
+    state().deleteSelected();
+
+    // Video 2 should be pruned automatically after deleting its only clip
+    expect(state().project.tracks.some((t) => t.id === v2Track.id)).toBe(false);
+    expect(state().project.tracks.some((t) => t.name === "Video 1")).toBe(true);
+  });
+
+  it("applies transition with ripple and removes transition cleanly", () => {
+    const p = state().project;
+    const c1 = p.clips[0];
+    const c2 = { ...structuredClone(c1), id: "c2", start: 3, duration: 3 };
+    const c3 = { ...structuredClone(c1), id: "c3", start: 6, duration: 3 };
+    state().commit({ ...p, clips: [c1, c2, c3] });
+
+    // Apply transition between c1 and c2 (duration 0.5)
+    state().applyTransition(c1.id, "dissolve", 0.5);
+
+    const afterTrans = state().project.clips;
+    const updatedC2 = afterTrans.find((c) => c.id === "c2")!;
+    const updatedC3 = afterTrans.find((c) => c.id === "c3")!;
+
+    expect(updatedC2.start).toBe(2.5);
+    expect(updatedC2.fadeIn).toBe(0.5);
+    // c3 was rippled along with c2
+    expect(updatedC3.start).toBe(5.5);
+
+    // Now remove transition on c2
+    state().removeTransition("c2");
+
+    const afterRemove = state().project.clips;
+    const restoredC2 = afterRemove.find((c) => c.id === "c2")!;
+    const restoredC3 = afterRemove.find((c) => c.id === "c3")!;
+
+    expect(restoredC2.start).toBe(3);
+    expect(restoredC2.fadeIn).toBe(0);
+    expect(restoredC3.start).toBe(6);
+  });
 });

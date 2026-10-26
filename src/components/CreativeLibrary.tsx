@@ -96,7 +96,18 @@ export function TextLibrary({
         <p className="creative-help">{t("creative.textHelp")}</p>
         <div className="creative-grid">
           {presets.map((p) => (
-            <article className="creative-card" key={p.id} data-preset-id={p.id}>
+            <article
+              className="creative-card is-draggable"
+              key={p.id}
+              data-preset-id={p.id}
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData("application/x-gocut-text", JSON.stringify(p));
+                e.dataTransfer.setData("application/x-reacut-text", JSON.stringify(p));
+                e.dataTransfer.setData("text/plain", p.name);
+                e.dataTransfer.effectAllowed = "copy";
+              }}
+            >
               <PresetPreview text={p} label={p.name} />
               <div>
                 <span>
@@ -140,7 +151,18 @@ export function MotionLibrary({
       <p className="creative-help">{t("creative.motionHelp")}</p>
       <div className="creative-grid">
         {presets.map((p) => (
-          <article className="creative-card" key={p.id} data-preset-id={p.id}>
+          <article
+            className="creative-card is-draggable"
+            key={p.id}
+            data-preset-id={p.id}
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData("application/x-gocut-motion", p.id);
+              e.dataTransfer.setData("application/x-reacut-motion", p.id);
+              e.dataTransfer.setData("text/plain", p.name);
+              e.dataTransfer.effectAllowed = "copy";
+            }}
+          >
             <PresetPreview motion={p.id} label={p.name} />
             <div>
               <span title={p.description}>

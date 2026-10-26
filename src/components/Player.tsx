@@ -96,8 +96,15 @@ export default function Player(props: PlayerProps) {
   }, []);
   useEffect(() => {
     const desired = new Set<string>();
-    clearPreviewLayers(new Set(project.clips.map((c) => c.id)));
-    for (const clip of project.clips) {
+    const allClips: Clip[] = [];
+    for (const c of project.clips) {
+      allClips.push(c);
+      if (c.isCompound && c.nestedClips) {
+        allClips.push(...c.nestedClips);
+      }
+    }
+    clearPreviewLayers(new Set(allClips.map((c) => c.id)));
+    for (const clip of allClips) {
       const asset = project.assets.find((a) => a.id === clip.assetId);
       if (!asset || asset.missing) continue;
       desired.add(clip.id);
@@ -265,6 +272,40 @@ export default function Player(props: PlayerProps) {
         Math.max(0, paintTime - clip.start),
       );
       const local = Math.max(0, paintTime - clip.start);
+      if (clip.isCompound && clip.nestedClips) {
+        const localCompound = Math.max(0, paintTime - clip.start) * clip.speed + clip.sourceIn;
+        for (const nc of clip.nestedClips) {
+          const ncSource = sources.current.get(nc.id);
+          const ncMedia = ncSource?.element;
+          const ncActive = active && localCompound >= nc.start && localCompound < nc.start + nc.duration;
+          if (ncMedia instanceof HTMLMediaElement) {
+            if (!ncActive) {
+              ncMedia.pause();
+              if (ncSource?.gain) ncSource.gain.gain.value = 0;
+            } else {
+              if (isPlaying && !ncSource?.gain) initializeAudio();
+              const ncLocal = Math.max(0, localCompound - nc.start);
+              const ncTarget = nc.sourceIn + ncLocal * nc.speed + 0.000001;
+              if (
+                Number.isFinite(ncMedia.duration) &&
+                Math.abs(ncMedia.currentTime - ncTarget) > (isPlaying ? 0.15 : 0.00001)
+              ) {
+                try {
+                  ncMedia.currentTime = Math.min(ncTarget, ncMedia.duration);
+                } catch {}
+              }
+              ncMedia.playbackRate = nc.speed * clip.speed;
+              let gain = (track.muted || clip.muted || nc.muted || localMuted.current) ? 0 : (evaluated.volume * nc.volume);
+              if (ncSource?.gain) {
+                ncSource.gain.gain.value = gain;
+                ncMedia.volume = 1;
+              } else ncMedia.volume = Math.min(1, gain);
+              if (isPlaying && ncMedia.paused) void ncMedia.play().catch(() => {});
+              if (!isPlaying && !ncMedia.paused) ncMedia.pause();
+            }
+          }
+        }
+      }
       if (media instanceof HTMLMediaElement) {
         if (!active) {
           media.pause();
@@ -328,7 +369,44 @@ export default function Player(props: PlayerProps) {
         if (a.saturation !== 1) filters.push(`saturate(${Math.max(0, a.saturation)})`);
       }
       ctx.filter = filters.length > 0 ? filters.join(" ") : "none";
-      if (clip.text) {
+      if (clip.isCompound && clip.nestedClips) {
+        const localCompound = Math.max(0, paintTime - clip.start) * clip.speed + clip.sourceIn;
+        const activeNested = clip.nestedClips
+          .filter((nc) => localCompound >= nc.start && localCompound < nc.start + nc.duration)
+          .sort((a, b) => a.start - b.start);
+        for (const nc of activeNested) {
+          if (nc.text) {
+            const layer = textPreviewLayer(nc);
+            ctx.drawImage(layer.canvas, -layer.width / 2, -layer.height / 2, layer.width, layer.height);
+          } else {
+            const ncSource = sources.current.get(nc.id);
+            const ncMedia = ncSource?.element;
+            const asset = p.assets.find((a) => a.id === nc.assetId);
+            if (asset && ncMedia) {
+              try {
+                if (!(
+                  (ncMedia instanceof HTMLVideoElement && ncMedia.readyState < 2) ||
+                  (ncMedia instanceof HTMLImageElement && !ncMedia.complete)
+                )) {
+                  const previewScale = Math.min(1, 1920 / asset.width, 1920 / asset.height);
+                  const layer = imagePreviewLayer(
+                    nc,
+                    ncMedia as HTMLImageElement | HTMLVideoElement,
+                    Math.max(1, Math.round(asset.width * previewScale)),
+                    Math.max(1, Math.round(asset.height * previewScale)),
+                    ncSource?.decodedTime,
+                  );
+                  const contain = Math.min(p.width / layer.width, p.height / layer.height);
+                  const w = layer.width * contain, h = layer.height * contain;
+                  ctx.drawImage(layer, -w / 2, -h / 2, w, h);
+                }
+              } catch {
+                /* Source not ready */
+              }
+            }
+          }
+        }
+      } else if (clip.text) {
         const layer = textPreviewLayer(clip);
         ctx.drawImage(
           layer.canvas,

@@ -178,7 +178,7 @@
   flex: 0 0 var(--tl-gutter);
   position: sticky;
   left: 0;
-  z-index: 10;
+  z-index: 20;
   box-sizing: border-box;
   background: #292929;
   border-right: 1px solid #1b1b1b;
@@ -827,4 +827,265 @@
   color: #a78bfa;
   font-size: 12px;
   font-weight: 600;
+}
+
+/* Tracks Container for CapCut-style vertical centering */
+.tl-tracks-container {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  transition: padding-top 0.15s ease-out;
+}
+
+/* Drag & Reorder Animations and Visual Feedback */
+.tl-floating-drag-item {
+  position: fixed;
+  pointer-events: none;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 10px;
+  border-radius: 7px;
+  background: rgba(18, 22, 28, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(57, 212, 190, 0.7);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7), 0 0 16px rgba(57, 212, 190, 0.25);
+  color: #f1f5f9;
+  font-size: 11px;
+  font-weight: 500;
+  transform: translate(-50%, -50%) scale(1.02);
+  transition: transform 0.06s cubic-bezier(0.2, 0, 0, 1);
+  will-change: transform, left, top;
+}
+
+.tl-floating-drag-item.tl-floating-drag-video {
+  border-color: rgba(57, 212, 190, 0.75);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7), 0 0 16px rgba(57, 212, 190, 0.3);
+}
+
+.tl-floating-drag-item.tl-floating-drag-audio {
+  border-color: rgba(57, 123, 93, 0.85);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7), 0 0 16px rgba(57, 123, 93, 0.3);
+}
+
+.tl-floating-drag-item.tl-floating-drag-text {
+  border-color: rgba(164, 86, 67, 0.85);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.7), 0 0 16px rgba(164, 86, 67, 0.3);
+}
+
+.tl-floating-drag-thumb-wrapper {
+  position: relative;
+  width: 38px;
+  height: 24px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  flex-shrink: 0;
+  background: #09090b;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+
+.tl-floating-drag-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.tl-floating-drag-badge {
+  position: absolute;
+  bottom: 1px;
+  right: 1px;
+  background: rgba(0, 0, 0, 0.75);
+  border-radius: 2px;
+  padding: 1px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #39d4be;
+  font-size: 8px;
+}
+
+.tl-floating-drag-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: rgba(57, 212, 190, 0.2);
+  color: #73efda;
+  flex-shrink: 0;
+}
+
+.tl-floating-drag-icon-audio {
+  background: rgba(57, 123, 93, 0.25);
+  color: #86efac;
+}
+
+.tl-floating-drag-icon-text {
+  background: rgba(164, 86, 67, 0.25);
+  color: #fca5a5;
+}
+
+.tl-floating-drag-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.tl-floating-drag-title-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.tl-floating-drag-link {
+  color: #38bdf8;
+  flex-shrink: 0;
+}
+
+.tl-floating-drag-name {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.tl-floating-drag-count {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.tl-floating-drag-duration {
+  font-size: 10px;
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+
+.tl-clip.is-drag-source-ghost {
+  opacity: 0.35 !important;
+  border: 1.5px dashed rgba(255, 255, 255, 0.5) !important;
+  filter: grayscale(40%) brightness(0.8);
+}
+
+.tl-insertion-beam {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #00f2fe;
+  box-shadow: 0 0 8px #00f2fe, 0 0 18px rgba(0, 242, 254, 0.65);
+  z-index: 45;
+  pointer-events: none;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  animation: tlBeamPulse 1.2s infinite alternate ease-in-out;
+}
+
+.tl-insertion-beam::before,
+.tl-insertion-beam::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  transform: translateX(-50%);
+}
+
+.tl-insertion-beam::before {
+  top: 0;
+  border-top: 6px solid #00f2fe;
+}
+
+.tl-insertion-beam::after {
+  bottom: 0;
+  border-bottom: 6px solid #00f2fe;
+}
+
+@keyframes tlBeamPulse {
+  from {
+    opacity: 0.85;
+    box-shadow: 0 0 6px #00f2fe;
+  }
+  to {
+    opacity: 1;
+    box-shadow: 0 0 12px #00f2fe, 0 0 22px rgba(0, 242, 254, 0.8);
+  }
+}
+
+.tl-track.is-drag-target {
+  background: rgba(99, 102, 241, 0.08) !important;
+  box-shadow: inset 0 0 0 1.5px rgba(99, 102, 241, 0.45);
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tl-subtimeline-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: linear-gradient(90deg, #181b34, #232247);
+  border-bottom: 1px solid #4338ca;
+  color: #e0e7ff;
+  font-size: 11px;
+  font-weight: 500;
+  z-index: 10;
+  flex-shrink: 0;
+}
+.tl-subtimeline-btn {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  transition: background 0.15s;
+}
+.tl-subtimeline-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.tl-subtimeline-sep {
+  color: #818cf8;
+  font-size: 13px;
+}
+.tl-subtimeline-current {
+  color: #c7d2fe;
+  font-weight: 600;
+}
+.tl-subtimeline-exit {
+  margin-left: auto;
+  background: #4f46e5;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.tl-subtimeline-exit:hover {
+  background: #4338ca;
+}
+
+.tl-clip-compound {
+  border: 1.5px solid #818cf8 !important;
+  background: linear-gradient(135deg, #1e1b4b, #312e81) !important;
 }

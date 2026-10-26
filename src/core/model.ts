@@ -625,7 +625,8 @@ export function validateProject(input: unknown): Project {
         track!.kind === "text" ||
         !(
           track!.kind === asset.kind ||
-          (track!.kind === "video" && asset.kind === "image")
+          (track!.kind === "video" && asset.kind === "image") ||
+          (track!.kind === "audio" && (asset.kind === "audio" || asset.hasAudio))
         )
       )
         fail("片段轨道与素材类型");

@@ -1,4 +1,25 @@
-# 更新记录
+# Catatan Rilis & Perubahan (Changelog)
+
+## 0.7.0 — 2026-10-26 (Creative Suite, Compound Sub-Timeline & Audio Separation)
+
+- **Pemisahan & Pemulihan Audio (Separate & Recover Audio)**:
+  - Menu klik kanan "Pisahkan Audio" (`separateAudio`) mengekstrak audio dari klip video ke trek audio di bawahnya secara otomatis, mempertahankan relasi grup sinkron dan penautan (`linkId`).
+  - Fitur "Pulihkan Audio Asal" (`recoverAudio`) mengembalikan audio bawaan video secara instan dan membersihkan sub-aset audio terkait.
+- **Klip Bersarang & Sub-Timeline (Compound Clips & Nested Timeline)**:
+  - Mengatasi masalah tampilan blank pada klip majemuk: pemutar kini merender seluruh komposisi `nestedClips` beserta sinkronisasi audio dan transformasi visual secara real-time.
+  - Klik ganda (*double-click*) pada klip bersarang untuk masuk ke Sub-Timeline mandiri lengkap dengan bilah navigasi breadcrumb (`🏠 Timeline Utama › 📦 [Nama Klip]`) dan tombol kembali.
+  - Opsi *Ungroup / Pisahkan Klip Bersarang* untuk mengembalikan klip ke timeline utama kapan saja.
+- **Drag & Drop Aset Kreatif ke Timeline**:
+  - Template teks, stiker, serta preset warna dan efek visual kini dapat diseret (*drag & drop*) langsung dari pustaka kreatif ke timeline atau ke atas klip media dengan penyorotan dropzone aktif.
+- **Pusat Kontrol Pemutar Presisi (Centered Transport Controls)**:
+  - Tombol pemutar (*play, pause, next/prev frame*) kini presisi dan simetris di tengah kanvas media menggunakan CSS grid 3-kolom (`1fr auto 1fr`), menghilangkan kemiringan tampilan.
+- **Penyederhanaan Source Preview**:
+  - Menghilangkan kontrol in/out numerik yang membebani antarmuka; kini scrubber media bersih, instan, responsif, dan dilengkapi tombol "+ Tambahkan ke Timeline".
+- **Desain Dialog Pengaturan & Modal (Glassmorphism & Card System)**:
+  - Desain modal diperbarui dengan tema gelap modern, efek blur kaca (*glassmorphism*), kartu section terorganisir (Bahasa, Status Mesin FFmpeg/FFprobe, Proyek Terbaru, dan Jaminan Privasi Offline).
+- **Perbaikan Stabilitas & Bugfix JSX**:
+  - Memperbaiki duplikasi atribut JSX `onDoubleClick` pada `Timeline.tsx` yang menyebabkan kesalahan kompilasi.
+  - Sinkronisasi penuh kamus multibahasa lengkap (Bahasa Indonesia, English, 简体中文, Türkçe).
 
 ## 未发布 — 2026-10-23 字幕工作流
 
@@ -67,7 +88,6 @@
 ## 0.4.0 — 2026-10-13
 
 - 更新为左向交叉带图标，统一应用和安装包图标；重整中英文 README 的功能、使用、开发和贡献入口。
-
 - 中性深灰三栏编辑器，资源顺序与属性分组对齐熟悉的操作习惯，适配小窗口。
 - 三栏宽度支持拖动与键盘微调、跨启动记忆、双击恢复默认，窗口缩小时保护播放器和属性区可用空间。
 - 单击源素材预览，视频/音频逐帧与 I/O 选段后插入；双击仍添加完整素材。
@@ -76,7 +96,7 @@
 - 整片、选中片段覆盖区间、自定义区间导出，保留区间内多轨画面与音频。
 - 安装包继续内置独立媒体工具，云端/SaaS/API AI 保持未实现。
 
-## 0.3.0
+## 0.3.0 — 2026-10-13
 
 - 原创薄荷绿/珊瑚色折带图标。
 - 34 款原创离线素材：透明贴纸、背景、标题底板和合成音效，含源码与许可；支持分类、搜索、试听和添加。
@@ -96,9 +116,9 @@
 - 新增项目文件夹导入和明确时间线选择，推荐活动时间线，避免导入空白主时间线。支持受控现代空时间线结构与原始画布尺寸推断。
 - 根据受控原生导出修正文字/视频图层、默认背景和变速取帧，修正非整帧裁剪的前驱画面保留；导入提示集中说明丢失的附加设置。
 - 增加固定合成载体、真实文件读取、逐帧媒体和桌面工作流验证；原始取证与私人载荷不随源码或安装包分发。
+- 验证、安装包信息及已知边界见 [验证记录](docs/VALIDATION.md)。字体排版与复杂效果仍有损；SaaS、云端和 API AI 留白。
 
-验证、安装包信息及已知边界见 [验证记录](docs/VALIDATION.md)。字体排版与复杂效果仍有损；SaaS、云端和 API AI 留白。
+## 0.1.0 — 2026-10-12
 
-## 0.1.0
-
-独立离线编辑器首版：媒体导入、时间线编辑、多轨、文字/字幕、基础音视频变换、裁剪/抠像/蒙版、关键帧/淡化/叠化、本地项目保存与 H.264/AAC 导出。macOS arm64 完成实际桌面和安装包验收；Windows/Linux 保留构建配置，未在本机验证。
+- 独立离线编辑器首版：媒体导入、时间线编辑、多轨、文字/字幕、基础音视频变换、裁剪/抠像/蒙版、关键帧/淡化/叠化、本地项目保存与 H.264/AAC 导出。
+- macOS arm64 完成实际桌面和安装包验收；Windows/Linux 保留构建配置。

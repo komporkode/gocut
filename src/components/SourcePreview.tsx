@@ -48,8 +48,11 @@ function SourcePreviewSession({ asset, fps, onClose, onAddRange, tracks }: Sourc
   useEffect(() => {
     alive.current = true;
     const element = media.current;
-    // React development StrictMode may replay effects while retaining the element.
-    if (element && !element.getAttribute("src")) { element.setAttribute("src", sourceUrl);element.load(); }
+    if (element) {
+      setError("");
+      element.setAttribute("src", sourceUrl);
+      element.load();
+    }
     return () => {
       alive.current = false;
       if (element) {
@@ -58,7 +61,7 @@ function SourcePreviewSession({ asset, fps, onClose, onAddRange, tracks }: Sourc
         element.load();
       }
     };
-  }, []);
+  }, [sourceUrl, asset.id]);
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
@@ -127,17 +130,15 @@ function SourcePreviewSession({ asset, fps, onClose, onAddRange, tracks }: Sourc
     const key = event.key.toLowerCase();
     if (key === " " && target.closest("button")) { event.stopPropagation();return; }
     if (key === "escape") { event.preventDefault();event.stopPropagation();pause();onClose();return; }
-    if (image || unavailable || !["i", "o", " ", "arrowleft", "arrowright"].includes(key)) return;
+    if (image || unavailable || ![" ", "arrowleft", "arrowright"].includes(key)) return;
     event.preventDefault();event.stopPropagation();
-    if (key === "i") setIn(media.current?.currentTime ?? time);
-    else if (key === "o") setOut(media.current?.currentTime ?? time);
-    else if (key === " ") { if (!event.repeat) void playPause(); }
+    if (key === " ") { if (!event.repeat) void playPause(); }
     else seek(time + (key === "arrowleft" ? -frame : frame));
   };
   const add = () => {
     if (unavailable) return;
     pause();
-    onAddRange(image ? 0 : sourceIn, image ? duration : sourceOut - sourceIn, mode, trackId || undefined);
+    onAddRange(0, duration, "insert", trackId || undefined);
   };
   return (
     <section ref={panel} className="source-preview player-panel panel" aria-label={t("sourcePreview.title")} tabIndex={0} onKeyDown={keyDown}
@@ -156,7 +157,6 @@ function SourcePreviewSession({ asset, fps, onClose, onAddRange, tracks }: Sourc
       </div>
       {!image && <>
         <div className="source-seek">
-          <div className="source-range-highlight" aria-hidden="true" style={{left: `${duration > 0 ? sourceIn / duration * 100 : 0}%`,width: `${duration > 0 ? (sourceOut-sourceIn)/duration*100 : 100}%`}} />
           <input aria-label={t("sourcePreview.seekProgress")} type="range" min={0} max={duration || 1} step={frame} value={time} disabled={unavailable} onChange={event => seek(Number(event.target.value))} />
         </div>
         <div className="source-controls">
@@ -166,18 +166,17 @@ function SourcePreviewSession({ asset, fps, onClose, onAddRange, tracks }: Sourc
         </div>
       </>}
       <footer className="source-range">
-        {!image && <div className="source-marks">
-          <label><button title={t("sourcePreview.setIn")} aria-label={t("sourcePreview.setIn")} disabled={unavailable} onClick={() => setIn(time)}>{t("sourcePreview.inPoint")} <kbd>I</kbd></button><input aria-label={t("sourcePreview.inPoint")} type="number" min={0} max={Math.max(0,sourceOut-minLength)} step={frame} value={Number(sourceIn.toFixed(6))} disabled={unavailable} onChange={event => {if(event.target.value !== "") setIn(Number(event.target.value));}} /><span>s</span></label>
-          <label><button title={t("sourcePreview.setOut")} aria-label={t("sourcePreview.setOut")} disabled={unavailable} onClick={() => setOut(time)}>{t("sourcePreview.outPoint")} <kbd>O</kbd></button><input aria-label={t("sourcePreview.outPoint")} type="number" min={sourceIn+minLength} max={duration} step={frame} value={Number(sourceOut.toFixed(6))} disabled={unavailable} onChange={event => {if(event.target.value !== "") setOut(Number(event.target.value));}} /><span>s</span></label>
-          <button title={t("sourcePreview.resetRange")} aria-label={t("sourcePreview.resetRange")} disabled={unavailable} onClick={() => {setSourceIn(0);setSourceOut(duration);seek(0);}}><RotateCcw size={14} /></button>
-        </div>}
-        {tracks && <div className="source-placement">
-          <label>{t("sourcePreview.placementMode")}<select aria-label={t("sourcePreview.placementMode")} value={mode} onChange={e => setMode(e.target.value as PlacementMode)}><option value="insert">{t("sourcePreview.insert")}</option><option value="overwrite">{t("sourcePreview.overwrite")}</option><option value="overlay">{t("sourcePreview.overlay")}</option></select></label>
-          <label>{t("sourcePreview.targetTrack")}<select aria-label={t("sourcePreview.targetTrack")} value={trackId} onChange={e => setTrackId(e.target.value)}><option value="">{t("sourcePreview.autoTrack")}</option>{tracks.map(trk => <option key={trk.id} value={trk.id} disabled={trk.locked}>{trk.name}{trk.locked ? ` · ${t("timeline.trackLocked")}` : ""}</option>)}</select></label>
-        </div>}
-        <div className="source-add-row"><span>{image ? `${asset.width} × ${asset.height} · ${t("nav.media")}` : <><Brackets size={12} /> {t("sourcePreview.selectedSpan", { time: formatTime(Math.max(0, sourceOut-sourceIn), frameRate) })}</>}</span><button className="primary" disabled={unavailable} onClick={add}><Plus size={14} />{image ? t("sourcePreview.addImage") : t("sourcePreview.addClip")}</button></div>
-        {!image && <p className="source-tip">{tracks ? (mode === "insert" ? t("sourcePreview.insertTip") : mode === "overwrite" ? t("sourcePreview.overwriteTip") : t("sourcePreview.overlayTip")) : t("sourcePreview.shortcutTip")}</p>}
-        {!image && ready && duration < frame - 1e-8 && <p className="source-error">{t("sourcePreview.tooShort")}</p>}
+        <div className="source-add-row">
+          <span>
+            {image
+              ? `${asset.width} × ${asset.height} · ${t("nav.media")}`
+              : `${formatTime(duration, frameRate)} · ${asset.width ? `${asset.width} × ${asset.height}` : "Audio"}`}
+          </span>
+          <button className="primary" disabled={unavailable} onClick={add}>
+            <Plus size={14} />
+            {image ? t("sourcePreview.addImage") : t("sourcePreview.addClip")}
+          </button>
+        </div>
       </footer>
     </section>
   );

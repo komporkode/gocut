@@ -22,6 +22,7 @@ export function isWailsEnvironment(): boolean {
 export function toMediaStreamUrl(filePathOrUrl: string): string {
   if (!filePathOrUrl) return "";
   if (filePathOrUrl.startsWith("/media-stream")) return filePathOrUrl;
+  if (filePathOrUrl.startsWith("blob:") || filePathOrUrl.startsWith("data:")) return filePathOrUrl;
 
   let targetPath = filePathOrUrl;
   if (targetPath.startsWith("reacut-media://")) {

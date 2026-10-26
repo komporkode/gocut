@@ -451,6 +451,7 @@ export function applyTransition(
   clipId: string,
   transition: TransitionId,
   seconds: number,
+  ripple = false,
 ): { project: Project; duration: number } {
   if (
     !TRANSITION_PRESETS.some((p) => p.id === transition) ||
@@ -485,7 +486,9 @@ export function applyTransition(
     end - (transition === "dip" ? 0 : duration),
     project.fps,
   );
+  const shift = newStart - next.start;
   if (
+    !ripple &&
     siblings[index + 2] &&
     newStart + next.duration > siblings[index + 2].start + 0.00001
   )
@@ -545,15 +548,116 @@ export function applyTransition(
     throw new Error("关联音频轨道已锁定，请先解锁");
   // A trimmed envelope's original end need not equal this clip's end: materialize the outgoing dip.
   if (transition === "dip") outgoing.videoFadeWindow = undefined;
+
+  const subsequentSiblings = siblings.slice(index + 2);
+  const subsequentSiblingIds = new Set(subsequentSiblings.map((c) => c.id));
+  const subsequentLinkedIds = new Set(linkedIds(project, Array.from(subsequentSiblingIds)));
+
   return {
     duration,
     project: {
       ...project,
-      clips: project.clips.map((c) =>
-        c.id === front.id ? outgoing : c.id === next.id ? incoming :
-        incomingIds.has(c.id) ? { ...c, start: c.start + newStart - next.start, audioFadeIn: duration, audioFadeWindow: undefined } :
-        outgoingIds.has(c.id) ? { ...c, audioFadeOut: duration, audioFadeWindow: undefined } : c,
-      ),
+      clips: project.clips.map((c) => {
+        if (c.id === front.id) return outgoing;
+        if (c.id === next.id) return incoming;
+        if (incomingIds.has(c.id)) {
+          return {
+            ...c,
+            start: snapToFrame(c.start + shift, project.fps),
+            audioFadeIn: duration,
+            audioFadeWindow: undefined,
+          };
+        }
+        if (outgoingIds.has(c.id)) {
+          return {
+            ...c,
+            audioFadeOut: duration,
+            audioFadeWindow: undefined,
+          };
+        }
+        if (ripple && shift !== 0 && (subsequentSiblingIds.has(c.id) || subsequentLinkedIds.has(c.id))) {
+          return {
+            ...c,
+            start: snapToFrame(Math.max(0, c.start + shift), project.fps),
+          };
+        }
+        return c;
+      }),
     },
+  };
+}
+
+export function removeTransition(
+  project: Project,
+  clipId: string,
+): Project {
+  const clip = project.clips.find((c) => c.id === clipId);
+  if (!clip) return project;
+  const track = project.tracks.find((t) => t.id === clip.trackId);
+  if (!track || track.locked) return project;
+
+  const siblings = project.clips
+    .filter((c) => c.trackId === track.id)
+    .sort((a, b) => a.start - b.start);
+  const index = siblings.findIndex((c) => c.id === clip.id);
+  const prev = siblings[index - 1];
+
+  let shift = 0;
+  if (prev && clip.start < prev.start + prev.duration) {
+    const desiredStart = snapToFrame(prev.start + prev.duration, project.fps);
+    shift = desiredStart - clip.start;
+  }
+
+  const outgoingIds = prev ? new Set(linkedIds(project, [prev.id])) : new Set<string>();
+  const incomingIds = new Set(linkedIds(project, [clip.id]));
+  const subsequentSiblings = siblings.slice(index + 1);
+  const subsequentSiblingIds = new Set(subsequentSiblings.map((c) => c.id));
+  const subsequentLinkedIds = new Set(linkedIds(project, Array.from(subsequentSiblingIds)));
+
+  return {
+    ...project,
+    clips: project.clips.map((c) => {
+      if (prev && c.id === prev.id) {
+        return {
+          ...c,
+          fadeOut: 0,
+          videoFadeWindow: undefined,
+          audioFadeOut: 0,
+          audioFadeWindow: undefined,
+        };
+      }
+      if (outgoingIds.has(c.id)) {
+        return {
+          ...c,
+          audioFadeOut: 0,
+          audioFadeWindow: undefined,
+        };
+      }
+      if (c.id === clip.id) {
+        return {
+          ...c,
+          start: snapToFrame(c.start + shift, project.fps),
+          fadeIn: 0,
+          videoFadeWindow: undefined,
+          audioFadeIn: 0,
+          audioFadeWindow: undefined,
+        };
+      }
+      if (incomingIds.has(c.id)) {
+        return {
+          ...c,
+          start: snapToFrame(c.start + shift, project.fps),
+          audioFadeIn: 0,
+          audioFadeWindow: undefined,
+        };
+      }
+      if (shift > 0 && (subsequentSiblingIds.has(c.id) || subsequentLinkedIds.has(c.id))) {
+        return {
+          ...c,
+          start: snapToFrame(c.start + shift, project.fps),
+        };
+      }
+      return c;
+    }),
   };
 }

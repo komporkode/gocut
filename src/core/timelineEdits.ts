@@ -1,4 +1,4 @@
-import type { Clip, Project } from './types';
+import type { Clip, MediaAsset, Project, Track } from './types';
 import { clone, createClip, createTrack, changeClipSpeed, id, snapToFrame, splitClip, trimClip, validateProject } from './model';
 import { DEFAULT_TRANSFORM, DEFAULT_ADJUSTMENTS } from './defaults';
 
@@ -16,21 +16,101 @@ export function unlinkClips(p: Project, ids: string[]): Project {
   if (p.clips.some(c => members.has(c.id) && locked(p, c))) return p;
   return { ...p, clips: p.clips.map(c => members.has(c.id) ? { ...c, linkId: undefined } : c) };
 }
-export function detachLinkedAudio(p: Project, clipId: string): { project: Project; audioId: string } {
+export function separateAudio(p: Project, clipId: string): { project: Project; audioId: string } {
   const video = p.clips.find(c => c.id === clipId);
   const asset = p.assets.find(a => a.id === video?.assetId);
-  if (!video || asset?.kind !== 'video' || !asset.hasAudio) throw new Error('请选择带声音的视频片段');
-  if (locked(p, video)) throw new Error('请先解锁轨道');
-  if (video.linkId) throw new Error('此片段已有画声关联，请先解除关联');
-  const audio = { ...asset, id: id(), kind: 'audio' as const, name: asset.name + ' · 音频', width: 0, height: 0, thumbnail: undefined };
-  const track = p.tracks.find(t => t.kind === 'audio' && !t.locked) ?? createTrack('audio', '分离音频');
-  const linkId = id();
-  const clip: Clip = { ...clone(video), id: id(), assetId: audio.id, trackId: track.id, name: audio.name, linkId,
-    keyframes: video.keyframes.filter(k => k.property === 'volume').map(k => ({ ...clone(k), id: id() })) };
-  return { audioId: clip.id, project: { ...p, assets: [...p.assets, audio],
-    tracks: p.tracks.includes(track) ? p.tracks : [...p.tracks, track],
-    clips: [...p.clips.map(c => c.id === video.id ? { ...c, muted: true, linkId } : c), clip] } };
+  if (!video || !asset || (asset.kind !== 'video' && !asset.hasAudio)) {
+    throw new Error('Please select a video clip with audio');
+  }
+  if (locked(p, video)) throw new Error('Cannot edit locked track');
+
+  const videoTrackIndex = p.tracks.findIndex(t => t.id === video.trackId);
+  let audioTrack = p.tracks.slice(videoTrackIndex + 1).find(t => t.kind === 'audio' && !t.locked)
+    ?? p.tracks.find(t => t.kind === 'audio' && !t.locked);
+
+  let updatedTracks = [...p.tracks];
+  if (!audioTrack) {
+    audioTrack = createTrack('audio', `Audio ${p.tracks.filter(t => t.kind === 'audio').length + 1}`);
+    updatedTracks.push(audioTrack);
+  }
+
+  const audioAsset: MediaAsset = {
+    ...asset,
+    id: id(),
+    kind: 'audio',
+    name: `${asset.name} (Audio)`,
+    width: 0,
+    height: 0,
+    thumbnail: undefined,
+  };
+
+  const linkId = video.linkId ?? id();
+  const audioClip: Clip = {
+    ...clone(video),
+    id: id(),
+    assetId: audioAsset.id,
+    trackId: audioTrack.id,
+    name: `${video.name} (Audio)`,
+    linkId,
+    muted: false,
+    text: undefined,
+    keyframes: video.keyframes.filter(k => k.property === 'volume').map(k => ({ ...clone(k), id: id() })),
+  };
+
+  const updatedClips = p.clips.map(c => c.id === video.id ? { ...c, muted: true, linkId } : c);
+  updatedClips.push(audioClip);
+
+  return {
+    audioId: audioClip.id,
+    project: {
+      ...p,
+      assets: [...p.assets, audioAsset],
+      tracks: updatedTracks,
+      clips: updatedClips,
+      updatedAt: new Date().toISOString(),
+    },
+  };
 }
+
+export function recoverAudio(p: Project, clipId: string): Project {
+  const target = p.clips.find(c => c.id === clipId);
+  if (!target) return p;
+
+  const targetTrack = p.tracks.find(t => t.id === target.trackId);
+  const isTargetAudio = targetTrack?.kind === 'audio' || target.name.endsWith(' (Audio)');
+
+  if (isTargetAudio && target.linkId) {
+    const parentVideo = p.clips.find(c => c.id !== target.id && c.linkId === target.linkId && p.tracks.find(t => t.id === c.trackId)?.kind !== 'audio');
+    const remainingClips = p.clips.filter(c => c.id !== target.id);
+    const remainingAssets = p.assets.filter(a => a.id !== target.assetId);
+    return {
+      ...p,
+      assets: remainingAssets,
+      clips: remainingClips.map(c => c.id === parentVideo?.id ? { ...c, muted: false, linkId: undefined } : c),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  if (target.muted && target.linkId) {
+    const audioClip = p.clips.find(c => c.id !== target.id && c.linkId === target.linkId && p.tracks.find(t => t.id === c.trackId)?.kind === 'audio');
+    const remainingClips = p.clips.filter(c => c.id !== audioClip?.id);
+    const remainingAssets = p.assets.filter(a => a.id !== audioClip?.assetId);
+    return {
+      ...p,
+      assets: remainingAssets,
+      clips: remainingClips.map(c => c.id === target.id ? { ...c, muted: false, linkId: undefined } : c),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  return {
+    ...p,
+    clips: p.clips.map(c => c.id === target.id ? { ...c, muted: false } : c),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export const detachLinkedAudio = separateAudio;
 
 /** Clamp the requested edge delta once against every member's source handles. */
 export function trimLinked(p: Project, clipId: string, edge: 'start' | 'end', time: number): Project {
@@ -271,12 +351,10 @@ export function rippleSnapTrack(p: Project, trackId: string): Project {
   const newStarts = new Map<string, number>();
 
   for (const clip of trackClips) {
-    if (clip.start > cursor + 1e-4) {
+    if (Math.abs(clip.start - cursor) > 1e-4) {
       newStarts.set(clip.id, cursor);
-      cursor = snapToFrame(cursor + clip.duration, p.fps);
-    } else {
-      cursor = Math.max(cursor, snapToFrame(clip.start + clip.duration, p.fps));
     }
+    cursor = snapToFrame(cursor + clip.duration, p.fps);
   }
 
   if (newStarts.size === 0) return p;
@@ -434,6 +512,165 @@ export function ungroupCompoundClip(
     ...project,
     clips: [...remainingClips, ...restoredClips],
     updatedAt: new Date().toISOString(),
+  };
+}
+
+export function reorderClip(
+  p: Project,
+  clipId: string,
+  targetTrackId: string,
+  targetTime: number,
+  mode: 'insert' | 'swap' | 'overwrite' = 'insert',
+): Project {
+  const primary = p.clips.find(c => c.id === clipId);
+  if (!primary || locked(p, primary)) return p;
+
+  const targetTrack = p.tracks.find(t => t.id === targetTrackId && !t.locked);
+  if (!targetTrack) return p;
+
+  const accepts = (t: Track, c: Clip) => {
+    if (c.text) return t.kind === 'text';
+    const asset = p.assets.find(a => a.id === c.assetId);
+    const kind = asset?.kind ?? p.tracks.find(tr => tr.id === c.trackId)?.kind;
+    return kind === 'audio'
+      ? t.kind === 'audio'
+      : kind === 'video'
+        ? t.kind === 'video'
+        : kind === 'image' && ['video', 'image'].includes(t.kind);
+  };
+  if (!accepts(targetTrack, primary)) return p;
+
+  const primaryVideoTrack = p.tracks.find(t => t.name === "Video 1") ?? p.tracks.find(t => t.kind === 'video');
+  const isMainTrack = targetTrack.id === primaryVideoTrack?.id;
+
+  const targetIds = new Set(linkedIds(p, [clipId]));
+  const otherClips = p.clips
+    .filter(c => c.trackId === targetTrackId && !targetIds.has(c.id))
+    .sort((a, b) => a.start - b.start);
+
+  if (isMainTrack || mode === 'insert') {
+    const t = Math.max(0, snapToFrame(targetTime, p.fps));
+    let insertIndex = otherClips.length;
+    for (let i = 0; i < otherClips.length; i++) {
+      const oc = otherClips[i];
+      const mid = oc.start + oc.duration / 2;
+      if (t < mid) {
+        insertIndex = i;
+        break;
+      }
+    }
+
+    const reorderedTrackClips = [
+      ...otherClips.slice(0, insertIndex),
+      primary,
+      ...otherClips.slice(insertIndex),
+    ];
+
+    let cursor = 0;
+    const newStarts = new Map<string, number>();
+    for (const c of reorderedTrackClips) {
+      newStarts.set(c.id, cursor);
+      cursor = snapToFrame(cursor + c.duration, p.fps);
+    }
+
+    const primaryNewStart = newStarts.get(primary.id)!;
+    const primaryDelta = primaryNewStart - primary.start;
+
+    const linkedDeltas = new Map<string, number>();
+    if (primary.linkId) {
+      linkedDeltas.set(primary.linkId, primaryDelta);
+    }
+
+    let nextClips = p.clips.map(c => {
+      if (c.id === primary.id) {
+        return { ...c, trackId: targetTrackId, start: primaryNewStart };
+      }
+      if (newStarts.has(c.id)) {
+        return { ...c, start: newStarts.get(c.id)! };
+      }
+      if (c.linkId && linkedDeltas.has(c.linkId)) {
+        return {
+          ...c,
+          start: Math.max(0, snapToFrame(c.start + linkedDeltas.get(c.linkId)!, p.fps)),
+        };
+      }
+      return c;
+    });
+
+    if (primary.trackId !== targetTrackId) {
+      const oldTrack = p.tracks.find(t => t.id === primary.trackId);
+      if (oldTrack && oldTrack.id === primaryVideoTrack?.id) {
+        const tempP = { ...p, clips: nextClips };
+        nextClips = rippleSnapTrack(tempP, oldTrack.id).clips;
+      }
+    }
+
+    return { ...p, clips: nextClips.sort((a, b) => a.start - b.start) };
+  }
+
+  const delta = snapToFrame(targetTime - primary.start, p.fps);
+  return moveLinked(p, [clipId], delta, targetTrackId);
+}
+
+export function swapClips(
+  p: Project,
+  clipId: string,
+  direction: 'prev' | 'next',
+): Project {
+  const clip = p.clips.find(c => c.id === clipId);
+  if (!clip || locked(p, clip)) return p;
+
+  const trackClips = p.clips
+    .filter(c => c.trackId === clip.trackId)
+    .sort((a, b) => a.start - b.start);
+
+  const idx = trackClips.findIndex(c => c.id === clipId);
+  if (idx < 0) return p;
+
+  const targetIdx = direction === 'prev' ? idx - 1 : idx + 1;
+  if (targetIdx < 0 || targetIdx >= trackClips.length) return p;
+
+  const targetClip = trackClips[targetIdx];
+  if (locked(p, targetClip)) return p;
+
+  const swappedList = [...trackClips];
+  swappedList[idx] = targetClip;
+  swappedList[targetIdx] = clip;
+
+  const primaryVideoTrack = p.tracks.find(t => t.name === "Video 1") ?? p.tracks.find(t => t.kind === 'video');
+  const isMainTrack = clip.trackId === primaryVideoTrack?.id;
+
+  let cursor = isMainTrack ? 0 : trackClips[0].start;
+  const newStarts = new Map<string, number>();
+  for (const c of swappedList) {
+    newStarts.set(c.id, cursor);
+    cursor = snapToFrame(cursor + c.duration, p.fps);
+  }
+
+  const linkedDeltas = new Map<string, number>();
+  for (const [cId, nStart] of newStarts.entries()) {
+    const orig = p.clips.find(c => c.id === cId);
+    if (orig && orig.linkId) {
+      linkedDeltas.set(orig.linkId, nStart - orig.start);
+    }
+  }
+
+  return {
+    ...p,
+    clips: p.clips
+      .map(c => {
+        if (newStarts.has(c.id)) {
+          return { ...c, start: newStarts.get(c.id)! };
+        }
+        if (c.linkId && linkedDeltas.has(c.linkId)) {
+          return {
+            ...c,
+            start: Math.max(0, snapToFrame(c.start + linkedDeltas.get(c.linkId)!, p.fps)),
+          };
+        }
+        return c;
+      })
+      .sort((a, b) => a.start - b.start),
   };
 }
 

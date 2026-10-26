@@ -29,15 +29,15 @@ const video: MediaAsset = {
 };
 
 describe("timeline positioning", () => {
-  it("partitions overlaps into separate sublanes while adjacent clips share one lane", () => {
+  it("keeps all clips on a single flat row in CapCut style (non-stacking lanes)", () => {
     const a = { ...createClip(video, "t", 0, 30), duration: 5 };
     const b = { ...createClip(video, "t", 2, 30), duration: 4 };
     const c = { ...createClip(video, "t", 5, 30), duration: 2 };
     const layout = layoutTrackClips([c, a, b]);
-    expect(layout.count).toBe(2);
-    expect(layout.height).toBe(132);
+    expect(layout.count).toBe(1);
+    expect(layout.height).toBe(70);
     expect(layout.lanes.get(a.id)).toBe(0);
-    expect(layout.lanes.get(b.id)).toBe(1);
+    expect(layout.lanes.get(b.id)).toBe(0);
     expect(layout.lanes.get(c.id)).toBe(0);
   });
   it("empty tracks retain a usable target height", () => {
@@ -110,6 +110,24 @@ describe("timeline positioning", () => {
     expect(canMoveToTrack(clip, videoTrack2, p)).toBe(true);
     expect(canMoveToTrack(clip, p.tracks.find(t => t.kind === "audio")!, p)).toBe(false);
   });
+  it("calculates insertion slot and beam time between clips", async () => {
+    const { calculateInsertionSlot } = await import("../src/components/Timeline");
+    const c1 = { ...createClip(video, "t", 0, 30), id: "c1", duration: 6 };
+    const c2 = { ...createClip(video, "t", 6, 30), id: "c2", duration: 4 };
+    const clips = [c1, c2];
+
+    const slot0 = calculateInsertionSlot(1, clips, "c3");
+    expect(slot0.insertIndex).toBe(0);
+    expect(slot0.insertTime).toBe(0);
+
+    const slot1 = calculateInsertionSlot(5, clips, "c3");
+    expect(slot1.insertIndex).toBe(1);
+    expect(slot1.insertTime).toBe(6);
+
+    const slot2 = calculateInsertionSlot(9, clips, "c3");
+    expect(slot2.insertIndex).toBe(2);
+    expect(slot2.insertTime).toBe(10);
+  });
 });
 describe("local effects", () => {
   it("constructs complete adjustment parameters using multiplicative defaults", () => {
@@ -147,5 +165,18 @@ describe("local effects", () => {
       fadeIn: 0,
       fadeOut: 0,
     });
+  });
+
+  it("safely handles undefined track without throwing (e.g. during drag above track)", () => {
+    const p = createProject();
+    const clip = createClip(video, p.tracks[1].id, 0, 30);
+    expect(canMoveToTrack(clip, undefined, p)).toBe(false);
+  });
+
+  it("returns false for locked tracks", () => {
+    const p = createProject();
+    const lockedTrack = { ...p.tracks[1], locked: true };
+    const clip = createClip(video, p.tracks[1].id, 0, 30);
+    expect(canMoveToTrack(clip, lockedTrack, p)).toBe(false);
   });
 });

@@ -12,6 +12,7 @@ import {
   Download,
   FilePlus2,
   FolderOpen,
+  Globe,
   Info,
   Keyboard,
   LoaderCircle,
@@ -62,6 +63,7 @@ import SourcePreview from "./components/SourcePreview";
 import EditorWorkspace from "./components/EditorWorkspace";
 import { captureVideoFrame } from "./core/mediaThumbnail";
 import Timeline from "./components/Timeline";
+import ErrorBoundary from "./components/ErrorBoundary";
 import EffectsPanel from "./components/EffectsPanel";
 import { TextLibrary, TransitionLibrary } from "./components/CreativeLibrary";
 import { addTextPreset, applyTransition, type TextPreset, type TransitionId } from "./core/creativePresets";
@@ -1502,36 +1504,38 @@ export default function App() {
                 timelineResize.current = null;
               }}
             />
-            <Timeline
-              project={s.project}
-              selectedIds={s.selectedIds}
-              zoom={s.zoom}
-              onSeek={(time) => { setSourceAssetId(null); s.seek(time); }}
-              onSelect={(ids) => { setSourceAssetId(null); s.select(ids); }}
-              onClipUpdate={s.updateClip}
-              onMoveClips={s.moveClips}
-              onTrim={s.trim}
-              onSplit={s.split}
-              onDelete={() => void safe(s.deleteSelected)}
-              onZoom={s.setZoom}
-              onTrackUpdate={s.updateTrack}
-              onTrackDelete={s.deleteTrack}
-              onTrackMove={s.reorderTrack}
-              onAddTrack={s.addTrack}
-              onDropAsset={(assetId, time, trackId) => {
-                setSourceAssetId(null); s.addAssetClip(assetId, time, trackId);
-              }}
-              snapping={s.snapping}
-              onSnappingChange={s.setSnapping}
-              magnetic={s.magnetic}
-              onMagneticChange={s.setMagnetic}
-              onDuplicate={s.duplicate}
-              onAddText={s.addText}
-              onUndo={s.undo}
-              onRedo={s.redo}
-              canUndo={pastLength > 0}
-              canRedo={futureLength > 0}
-            />
+            <ErrorBoundary fallbackTitle="Terjadi kendala visual pada Timeline">
+              <Timeline
+                project={s.project}
+                selectedIds={s.selectedIds}
+                zoom={s.zoom}
+                onSeek={(time) => { setSourceAssetId(null); s.seek(time); }}
+                onSelect={(ids) => { setSourceAssetId(null); s.select(ids); }}
+                onClipUpdate={s.updateClip}
+                onMoveClips={s.moveClips}
+                onTrim={s.trim}
+                onSplit={s.split}
+                onDelete={() => void safe(s.deleteSelected)}
+                onZoom={s.setZoom}
+                onTrackUpdate={s.updateTrack}
+                onTrackDelete={s.deleteTrack}
+                onTrackMove={s.reorderTrack}
+                onAddTrack={s.addTrack}
+                onDropAsset={(assetId, time, trackId) => {
+                  setSourceAssetId(null); s.addAssetClip(assetId, time, trackId);
+                }}
+                snapping={s.snapping}
+                onSnappingChange={s.setSnapping}
+                magnetic={s.magnetic}
+                onMagneticChange={s.setMagnetic}
+                onDuplicate={s.duplicate}
+                onAddText={s.addText}
+                onUndo={s.undo}
+                onRedo={s.redo}
+                canUndo={pastLength > 0}
+                canRedo={futureLength > 0}
+              />
+            </ErrorBoundary>
           </div>
         );
 
@@ -1742,89 +1746,114 @@ export default function App() {
       {modal === "settings" && (
         <ModalShell title={t("settings.title")} onClose={() => setModal(null)}>
           <div className="modal-body">
-          <h3>{t("settings.language")}</h3>
-              <p className="muted small">{t("settings.language.description")}</p>
+            {/* Language Selection Card */}
+            <div className="settings-section">
+              <div className="settings-section-header">
+                <Globe size={15} />
+                <h3>{t("settings.language")}</h3>
+              </div>
+              <p className="muted">{t("settings.language.description")}</p>
               <select
                 aria-label={t("settings.language")}
                 value={language}
                 onChange={(e) => setLanguage(e.target.value as Language)}
-                style={{ marginTop: "0.5rem", marginBottom: "1rem" }}
               >
-                <option value="zh-CN">{t("settings.language.zh-CN")}</option>
-                <option value="en">{t("settings.language.en")}</option>
-                <option value="id">{t("settings.language.id")}</option>
-                <option value="tr">{t("settings.language.tr")}</option>
+                <option value="id">🇮🇩 {t("settings.language.id")}</option>
+                <option value="en">🇬🇧 {t("settings.language.en")}</option>
+                <option value="zh-CN">🇨🇳 {t("settings.language.zh-CN")}</option>
+                <option value="tr">🇹🇷 {t("settings.language.tr")}</option>
               </select>
-            <div className={`engine-status ${system.ffmpeg ? "ready" : ""}`}>
-              {system.ffmpeg ? <CheckCircle2 size={18} /> : <Info size={18} />}
-              <div>
-                <strong>
-                  {system.ffmpeg ? t("settings.engine.ready") : t("settings.engine.missing")}
-                </strong>
-                <span>
-                  {system.ffmpegVersion ?? t("settings.engine.hint")}
-                </span>
+            </div>
+
+            {/* Media Engine Card */}
+            <div className="settings-section">
+              <div className="settings-section-header">
+                <Video size={15} />
+                <h3>Mesin Media (FFmpeg & FFprobe)</h3>
+              </div>
+              <div className={`engine-status-card ${system.ffmpeg ? "" : "missing"}`}>
+                {system.ffmpeg ? <CheckCircle2 size={18} /> : <Info size={18} />}
+                <div>
+                  <strong>
+                    {system.ffmpeg ? t("settings.engine.ready") : t("settings.engine.missing")}
+                  </strong>
+                  <span>
+                    {system.ffmpegVersion ?? t("settings.engine.hint")}
+                  </span>
+                </div>
+              </div>
+              {system.ffmpegPath && (
+                <code className="engine-path-pill">
+                  {system.ffmpegPath}
+                </code>
+              )}
+              <div className="button-row" style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={() =>
+                    void safe(async () => {
+                      await window.editorAPI?.chooseMediaTool("ffmpeg");
+                      await refreshSystem();
+                    })
+                  }
+                >
+                  {t("settings.engine.chooseFfmpeg")}
+                </button>
+                <button
+                  onClick={() =>
+                    void safe(async () => {
+                      await window.editorAPI?.chooseMediaTool("ffprobe");
+                      await refreshSystem();
+                    })
+                  }
+                >
+                  {t("settings.engine.chooseFfprobe")}
+                </button>
               </div>
             </div>
-            <p className="muted small">
-              {system.ffmpegPath ?? t("settings.engine.bundledHint")}
-            </p>
-            <div className="button-row">
-              <button
-                onClick={() =>
-                  void safe(async () => {
-                    await window.editorAPI?.chooseMediaTool("ffmpeg");
-                    await refreshSystem();
-                  })
-                }
-              >
-                {t("settings.engine.chooseFfmpeg")}
-              </button>
-              <button
-                onClick={() =>
-                  void safe(async () => {
-                    await window.editorAPI?.chooseMediaTool("ffprobe");
-                    await refreshSystem();
-                  })
-                }
-              >
-                {t("settings.engine.chooseFfprobe")}
-              </button>
-            </div>
-            <h3>{t("settings.recentProjects")}</h3>
-            {recent.length === 0 ? (
-              <p className="muted small">{t("settings.recentProjects.empty")}</p>
-            ) : (
-              <div className="recent-list">
-                {recent.map((p) => (
-                  <button
-                    key={p.path}
-                    onClick={() =>
-                      void safe(async () => {
-                        if (!confirmReplace()) return;
-                        const result =
-                          await window.editorAPI?.openRecentProject(p.path);
-                        if (result) {
-                          s.setProject(result.project, result.path);
-                          setModal(null);
-                        }
-                      })
-                    }
-                  >
-                    <FolderOpen size={16} />
-                    <div>
-                      <strong>{p.name}</strong>
-                      <span>{p.path}</span>
-                    </div>
-                  </button>
-                ))}
+
+            {/* Recent Projects Card */}
+            <div className="settings-section">
+              <div className="settings-section-header">
+                <FolderOpen size={15} />
+                <h3>{t("settings.recentProjects")}</h3>
               </div>
-            )}
-            <div className="future-feature">
+              {recent.length === 0 ? (
+                <p className="muted">{t("settings.recentProjects.empty")}</p>
+              ) : (
+                <div className="recent-list" style={{ maxHeight: "150px", overflowY: "auto" }}>
+                  {recent.map((p) => (
+                    <button
+                      key={p.path}
+                      className="recent-project-item"
+                      onClick={() =>
+                        void safe(async () => {
+                          if (!confirmReplace()) return;
+                          const result =
+                            await window.editorAPI?.openRecentProject(p.path);
+                          if (result) {
+                            s.setProject(result.project, result.path);
+                            setModal(null);
+                          }
+                        })
+                      }
+                    >
+                      <FolderOpen size={16} />
+                      <div>
+                        <strong>{p.name}</strong>
+                        <span>{p.path}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Privacy Card */}
+            <div className="privacy-badge-box">
               <CloudOff size={16} />
               <div>
-                <strong>{t("settings.futureFeatures.title")}</strong>
-                <p>{t("settings.futureFeatures.description")}</p>
+                <strong>Privasi Penuh & Operasi 100% Offline</strong>
+                <p>GoCut memproses semua video, audio, dan efek langsung di perangkat Anda tanpa telemetri atau pengunggahan cloud.</p>
               </div>
             </div>
           </div>

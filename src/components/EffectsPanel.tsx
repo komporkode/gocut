@@ -237,10 +237,10 @@ export default function EffectsPanel({
           <>
             <p className="effects-help">
               {kind === "audio"
-                ? "音频片段可在「淡入淡出」中调整声音变化。"
+                ? t("effects.helpAudio")
                 : kind === "text"
-                  ? "文字样式在右侧属性中编辑；「淡入淡出」可设置文字的显示变化。"
-                  : "选择预设即应用到片段。可在右侧属性中继续微调。"}
+                  ? t("effects.helpText")
+                  : t("effects.helpVideo")}
             </p>
             <label className="creative-search">
               <input
@@ -255,9 +255,16 @@ export default function EffectsPanel({
                 (p.name + p.description).includes(query.trim()),
               ).map((preset) => (
                 <article
-                  className="creative-card"
+                  className="creative-card is-draggable"
                   key={preset.id}
                   data-preset-id={preset.id}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("application/x-gocut-effect", JSON.stringify(preset.adjustments));
+                    e.dataTransfer.setData("application/x-reacut-effect", JSON.stringify(preset.adjustments));
+                    e.dataTransfer.setData("text/plain", getPresetName(preset));
+                    e.dataTransfer.effectAllowed = "copy";
+                  }}
                 >
                   <PresetPreview
                     adjustments={preset.adjustments}
@@ -265,8 +272,8 @@ export default function EffectsPanel({
                   />
                   <div>
                     <span>
-                      {preset.name}
-                      <small>{preset.description}</small>
+                      {getPresetName(preset)}
+                      <small>{getPresetDesc(preset)}</small>
                     </span>
                     <button
                       disabled={colorDisabled}
