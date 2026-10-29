@@ -117,6 +117,26 @@ export interface Track {
   hidden: boolean;
   locked: boolean;
 }
+export type TransitionType =
+  | "dissolve"
+  | "dip"
+  | "slide-left"
+  | "slide-right"
+  | "slide-up"
+  | "slide-down"
+  | "zoom"
+  | "spin"
+  | "wipe-left"
+  | "wipe-right";
+
+export interface Transition {
+  id: string;
+  trackId: string;
+  fromClipId: string;
+  toClipId: string;
+  type: TransitionType;
+  duration: number;
+}
 export interface Project {
   version: 1;
   id: string;
@@ -128,6 +148,7 @@ export interface Project {
   assets: MediaAsset[];
   tracks: Track[];
   clips: Clip[];
+  transitions?: Transition[];
   createdAt: string;
   updatedAt: string;
 }
