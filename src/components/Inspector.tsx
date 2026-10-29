@@ -20,6 +20,7 @@ import type { Clip, Keyframe, Project } from "../core/types";
 import { DEFAULT_TRANSFORM, DEFAULT_ADJUSTMENTS } from "../core/defaults";
 import { evaluateKeyframes, formatTime, id } from "../core/model";
 import VisualTools from "./VisualTools";
+import TransitionInspector from "./TransitionInspector";
 import "./Inspector.css";
 import { useEditorStore } from "../editor/store";
 import { useTranslation } from "../i18n";
@@ -173,6 +174,11 @@ export default function Inspector(props: Props) {
           : "画面",
     );
   }, [clip?.id, !!clip?.text]);
+  const selectedTransitionId = useEditorStore((s) => s.selectedTransitionId);
+  if (selectedTransitionId) {
+    return <TransitionInspector transitionId={selectedTransitionId} />;
+  }
+
   if (!clip)
     return (
       <aside className="inspector panel">
