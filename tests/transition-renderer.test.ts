@@ -36,3 +36,4 @@ describe('transitionRenderer', () => {
     expect(endMod.clipB.dx).toBe(0);
   });
 });
+

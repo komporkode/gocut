@@ -122,3 +122,4 @@ describe('transitionEdits core', () => {
     expect(c3.start).toBe(7.0);
   });
 });
+

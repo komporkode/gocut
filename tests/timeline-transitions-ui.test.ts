@@ -45,3 +45,4 @@ describe('timeline transitions logic helpers', () => {
     expect(isAdjacent).toBe(true);
   });
 });
+

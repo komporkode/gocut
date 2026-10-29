@@ -99,3 +99,4 @@ describe('useEditorStore transitions', () => {
     expect(useEditorStore.getState().selectedTransitionId).toBeNull();
   });
 });
+

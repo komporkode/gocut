@@ -9,3 +9,4 @@ describe('transition presets for inspector', () => {
     expect(dissolve?.name).toBe('Cross Dissolve');
   });
 });
+
