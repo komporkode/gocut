@@ -552,8 +552,10 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 			Speed       float64 `json:"speed"`
 			Volume      float64 `json:"volume"`
 			Muted       bool    `json:"muted"`
-			FadeIn      float64 `json:"fadeIn"`
-			FadeOut     float64 `json:"fadeOut"`
+			FadeIn       float64 `json:"fadeIn"`
+			FadeOut      float64 `json:"fadeOut"`
+			AudioFadeIn  float64 `json:"audioFadeIn"`
+			AudioFadeOut float64 `json:"audioFadeOut"`
 			Transform   *struct {
 				X        float64 `json:"x"`
 				Y        float64 `json:"y"`
@@ -589,6 +591,14 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 			Muted  bool   `json:"muted"`
 			Hidden bool   `json:"hidden"`
 		} `json:"tracks"`
+		Transitions []struct {
+			ID         string  `json:"id"`
+			TrackID    string  `json:"trackId"`
+			FromClipID string  `json:"fromClipId"`
+			ToClipID   string  `json:"toClipId"`
+			Type       string  `json:"type"`
+			Duration   float64 `json:"duration"`
+		} `json:"transitions"`
 	}
 	if err := json.Unmarshal([]byte(projectJson), &proj); err != nil {
 		return "", 0, nil, fmt.Errorf("invalid project json: %w", err)
@@ -705,6 +715,8 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 	}
 
 	type VisualClip struct {
+		ID          string
+		TrackID     string
 		Path        string
 		Start       float64
 		Duration    float64
@@ -724,12 +736,15 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 	}
 
 	type AudioClip struct {
+		ID       string
 		Path     string
 		Start    float64
 		Duration float64
 		SourceIn float64
 		Speed    float64
 		Volume   float64
+		FadeIn   float64
+		FadeOut  float64
 	}
 
 	var visualClips []VisualClip
@@ -811,6 +826,8 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 			}
 
 			visualClips = append(visualClips, VisualClip{
+				ID:         c.ID,
+				TrackID:    c.TrackID,
 				Path:       clipPath,
 				Start:      c.Start,
 				Duration:   c.Duration,
@@ -836,12 +853,15 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 			hasAudioStream := as.Kind == "audio" || (hasTrack && tm.Kind == "audio") || (as.Kind == "video" && as.HasAudio)
 			if hasAudioStream {
 				audioClips = append(audioClips, AudioClip{
+					ID:       c.ID,
 					Path:     clipPath,
 					Start:    c.Start,
 					Duration: c.Duration,
 					SourceIn: c.SourceIn,
 					Speed:    speed,
 					Volume:   vol,
+					FadeIn:   c.AudioFadeIn,
+					FadeOut:  c.AudioFadeOut,
 				})
 			}
 		}
@@ -853,6 +873,26 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		}
 		return visualClips[i].Start < visualClips[j].Start
 	})
+
+	// Apply transitions to visual and audio clip fades
+	for _, tr := range proj.Transitions {
+		for i := range visualClips {
+			if visualClips[i].ID == tr.FromClipID && visualClips[i].FadeOut == 0 {
+				visualClips[i].FadeOut = tr.Duration
+			}
+			if visualClips[i].ID == tr.ToClipID && visualClips[i].FadeIn == 0 {
+				visualClips[i].FadeIn = tr.Duration
+			}
+		}
+		for i := range audioClips {
+			if audioClips[i].ID == tr.FromClipID && audioClips[i].FadeOut == 0 {
+				audioClips[i].FadeOut = tr.Duration
+			}
+			if audioClips[i].ID == tr.ToClipID && audioClips[i].FadeIn == 0 {
+				audioClips[i].FadeIn = tr.Duration
+			}
+		}
+	}
 
 	var args []string
 	args = append(args, "-y")
@@ -928,8 +968,28 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 
 		filterComplex = append(filterComplex, fmt.Sprintf("[%d:v]%s[%s]", inIdx, strings.Join(clipFilters, ","), clipTag))
 
+		xExpr := fmt.Sprintf("%d", posX)
+		yExpr := fmt.Sprintf("%d", posY)
+
+		for _, tr := range proj.Transitions {
+			if tr.ToClipID == vc.ID && tr.Duration > 0 {
+				tEnd := vc.Start + tr.Duration
+				switch tr.Type {
+				case "slide-left":
+					xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
+				case "slide-right":
+					xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
+				case "slide-up":
+					yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
+				case "slide-down":
+					yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
+				}
+				break
+			}
+		}
+
 		nextBase := fmt.Sprintf("[base%d]", inIdx)
-		filterComplex = append(filterComplex, fmt.Sprintf("%s[%s]overlay=x=%d:y=%d:enable='between(t,%.3f,%.3f)'%s", currentBase, clipTag, posX, posY, vc.Start, vc.Start+vc.Duration, nextBase))
+		filterComplex = append(filterComplex, fmt.Sprintf("%s[%s]overlay=x='%s':y='%s':enable='between(t,%.3f,%.3f)'%s", currentBase, clipTag, xExpr, yExpr, vc.Start, vc.Start+vc.Duration, nextBase))
 		currentBase = nextBase
 	}
 
@@ -961,7 +1021,20 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		if delayMs < 0 {
 			delayMs = 0
 		}
-		filterComplex = append(filterComplex, fmt.Sprintf("[%d:a]volume=%.2f,aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,adelay=delays=%d:all=1[%s]", inIdx, ac.Volume, delayMs, tag))
+		var aFilters []string
+		aFilters = append(aFilters, fmt.Sprintf("volume=%.2f", ac.Volume))
+		if ac.FadeIn > 0 {
+			aFilters = append(aFilters, fmt.Sprintf("afade=t=in:ss=0:d=%.3f:curve=qsin", ac.FadeIn))
+		}
+		if ac.FadeOut > 0 {
+			st := ac.Duration - ac.FadeOut
+			if st < 0 {
+				st = 0
+			}
+			aFilters = append(aFilters, fmt.Sprintf("afade=t=out:st=%.3f:d=%.3f:curve=qsin", st, ac.FadeOut))
+		}
+		aFilters = append(aFilters, "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo", fmt.Sprintf("adelay=delays=%d:all=1", delayMs))
+		filterComplex = append(filterComplex, fmt.Sprintf("[%d:a]%s[%s]", inIdx, strings.Join(aFilters, ","), tag))
 		audioTags = append(audioTags, fmt.Sprintf("[%s]", tag))
 	}
 

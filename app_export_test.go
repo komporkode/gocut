@@ -158,4 +158,49 @@ func TestUserProjectExport(t *testing.T) {
 		}
 		t.Logf("Locked file correctly blocked: %v", err)
 	})
+
+	// Test 5: Export with transitions
+	t.Run("TransitionsFilterComplex", func(t *testing.T) {
+		transProj := `{
+			"name": "Transition Project",
+			"width": 1920,
+			"height": 1080,
+			"fps": 30,
+			"background": "#000000",
+			"assets": [
+				{"id":"a1","name":"v.mp4","path":"` + filepath.ToSlash(dummyPng) + `","kind":"image","duration":10,"width":1920,"height":1080,"fps":30,"hasAudio":false}
+			],
+			"tracks": [
+				{"id":"v1","name":"Video 1","kind":"video","muted":false,"hidden":false}
+			],
+			"clips": [
+				{"id":"c1","trackId":"v1","assetId":"a1","name":"c1","start":0,"duration":4,"sourceIn":0,"speed":1,"volume":1,"muted":false,"fadeIn":0,"fadeOut":0},
+				{"id":"c2","trackId":"v1","assetId":"a1","name":"c2","start":3,"duration":4,"sourceIn":0,"speed":1,"volume":1,"muted":false,"fadeIn":0,"fadeOut":0}
+			],
+			"transitions": [
+				{"id":"t1","trackId":"v1","fromClipId":"c1","toClipId":"c2","type":"slide-left","duration":1.0}
+			]
+		}`
+		tempDir := t.TempDir()
+		outputFile := filepath.Join(tempDir, "test_transition.mp4")
+		optionsJson := `{"path":"` + filepath.ToSlash(outputFile) + `","format":"mp4","width":1920,"height":1080,"fps":30,"duration":7}`
+
+		_, _, args, err := app.BuildExportArgs(transProj, optionsJson)
+		if err != nil {
+			t.Fatalf("BuildExportArgs with transitions failed: %v", err)
+		}
+
+		filterStr := ""
+		for idx, arg := range args {
+			if arg == "-filter_complex" && idx+1 < len(args) {
+				filterStr = args[idx+1]
+				break
+			}
+		}
+
+		if filterStr == "" {
+			t.Fatalf("Expected -filter_complex in args, got: %v", args)
+		}
+		t.Logf("Generated filter_complex: %s", filterStr)
+	})
 }
