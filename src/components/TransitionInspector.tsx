@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { Trash2, X, SlidersHorizontal, Check, Sparkles, Clock, Layers } from 'lucide-react';
+import { Trash2, X, SlidersHorizontal, Sparkles, Clock } from 'lucide-react';
 import { useEditorStore } from '../editor/store';
-import { TRANSITION_PRESETS, type TransitionId } from '../core/creativePresets';
-import type { TransitionType } from '../core/types';
+import { TRANSITION_PRESETS } from '../core/creativePresets';
 
 interface TransitionInspectorProps {
   transitionId: string;
@@ -15,7 +14,6 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
   const removeTransitionRecord = useEditorStore((s) => s.removeTransitionRecord);
   const applyTransitionToAllCuts = useEditorStore((s) => s.applyTransitionToAllCuts);
 
-  const [activeCategory, setActiveCategory] = useState<string>('All');
   const [appliedNotification, setAppliedNotification] = useState<string | null>(null);
 
   const transition = project.transitions?.find((t) => t.id === transitionId);
@@ -24,22 +22,6 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
   const fromClip = project.clips.find((c) => c.id === transition.fromClipId);
   const toClip = project.clips.find((c) => c.id === transition.toClipId);
   const maxSafeDuration = fromClip && toClip ? Math.min(fromClip.duration, toClip.duration) : 5.0;
-
-  const categories = ['All', 'Basic', 'Motion', 'Dynamic'];
-  const filteredPresets =
-    activeCategory === 'All'
-      ? TRANSITION_PRESETS
-      : TRANSITION_PRESETS.filter((p) => p.category === activeCategory);
-
-  const handleTypeSelect = (typeId: TransitionId) => {
-    // Update type directly on the existing transition
-    const p = structuredClone(project);
-    const target = p.transitions?.find((t: any) => t.id === transitionId);
-    if (target) {
-      target.type = typeId as TransitionType;
-      useEditorStore.getState().commit(p);
-    }
-  };
 
   const handleApplyToAll = () => {
     applyTransitionToAllCuts(transition.type, transition.duration, transition.trackId);
@@ -80,9 +62,9 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
       <div className="inspector-content" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
         {/* Selected Transition Overview */}
         <div className="transition-active-card" style={{
-          background: 'linear-gradient(135deg, rgba(30, 58, 138, 0.4) 0%, rgba(88, 28, 135, 0.4) 100%)',
-          border: '1px solid rgba(96, 165, 250, 0.4)',
-          borderRadius: '8px',
+          background: '#161920',
+          border: '1px solid rgba(255, 255, 255, 0.12)',
+          borderRadius: '6px',
           padding: '12px',
           display: 'flex',
           alignItems: 'center',
@@ -97,13 +79,13 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
             </div>
           </div>
           <div style={{
-            background: 'rgba(15, 23, 42, 0.8)',
-            border: '1px solid #38bdf8',
+            background: 'rgba(0, 196, 204, 0.12)',
+            border: '1px solid rgba(0, 196, 204, 0.5)',
             borderRadius: '4px',
             padding: '3px 8px',
             fontSize: '11px',
             fontWeight: 600,
-            color: '#38bdf8',
+            color: '#00c4cc',
           }}>
             {transition.duration.toFixed(2)}s
           </div>
@@ -151,7 +133,7 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
             step="0.05"
             value={transition.duration}
             onChange={(e) => resizeTransitionRecord(transition.id, parseFloat(e.target.value))}
-            style={{ width: '100%', accentColor: '#38bdf8', cursor: 'pointer' }}
+            style={{ width: '100%', accentColor: '#00c4cc', cursor: 'pointer' }}
           />
 
           {/* Quick preset buttons */}
@@ -164,7 +146,7 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
                   flex: 1,
                   padding: '4px 0',
                   fontSize: '11px',
-                  background: Math.abs(transition.duration - dur) < 0.04 ? '#0284c7' : '#1e293b',
+                  background: Math.abs(transition.duration - dur) < 0.04 ? '#008899' : '#1e2530',
                   color: Math.abs(transition.duration - dur) < 0.04 ? '#ffffff' : '#94a3b8',
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '4px',
@@ -179,88 +161,14 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
           </div>
         </div>
 
-        {/* Transition Presets Gallery */}
-        <div className="transition-presets-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Layers size={14} />
-              Katalog Transisi
-            </label>
-          </div>
-
-          {/* Category Chips */}
-          <div style={{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
-            {categories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                style={{
-                  padding: '3px 10px',
-                  borderRadius: '12px',
-                  fontSize: '11px',
-                  background: activeCategory === cat ? '#38bdf8' : 'rgba(255, 255, 255, 0.08)',
-                  color: activeCategory === cat ? '#0f172a' : '#94a3b8',
-                  border: 'none',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                {cat === 'All' ? 'Semua' : cat === 'Basic' ? 'Dasar' : cat === 'Motion' ? 'Gerakan' : 'Dinamis'}
-              </button>
-            ))}
-          </div>
-
-          {/* Preset Cards Grid */}
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
-            gap: '8px',
-            maxHeight: '220px',
-            overflowY: 'auto',
-            paddingRight: '4px',
-          }}>
-            {filteredPresets.map((preset) => {
-              const isSelected = transition.type === preset.id;
-              return (
-                <div
-                  key={preset.id}
-                  onClick={() => handleTypeSelect(preset.id)}
-                  style={{
-                    background: isSelected ? 'rgba(56, 189, 248, 0.18)' : '#1e293b',
-                    border: isSelected ? '1.5px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.08)',
-                    borderRadius: '6px',
-                    padding: '8px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '4px',
-                    position: 'relative',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: isSelected ? '#38bdf8' : '#e2e8f0' }}>
-                      {preset.name}
-                    </span>
-                    {isSelected && <Check size={14} color="#38bdf8" />}
-                  </div>
-                  <span style={{ fontSize: '10px', color: '#94a3b8', lineHeight: '1.2' }}>
-                    {preset.category}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
         {/* Apply to All Footer Button */}
-        <div style={{ marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+        <div style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
           <button
             onClick={handleApplyToAll}
             style={{
               width: '100%',
               padding: '9px 12px',
-              background: '#2563eb',
+              background: '#008899',
               border: 'none',
               borderRadius: '6px',
               color: '#ffffff',
@@ -271,7 +179,6 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
               alignItems: 'center',
               justifyContent: 'center',
               gap: '6px',
-              boxShadow: '0 2px 8px rgba(37, 99, 235, 0.4)',
               transition: 'background 0.15s',
             }}
           >

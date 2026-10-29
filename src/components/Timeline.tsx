@@ -1784,8 +1784,9 @@ export default function Timeline(props: TimelineProps) {
                       const isDraggingThis =
                         gesture?.kind === "resize-transition" && gesture.transitionId === trans.id;
                       const currentDur = isDraggingThis ? gesture.currentDuration : trans.duration;
-                      const bridgeWidth = Math.max(24, currentDur * pps);
-                      const bridgeLeft = clip.start * pps;
+                      const bridgeWidth = Math.max(28, currentDur * pps);
+                      const cutCenter = (prev.start + prev.duration + clip.start) / 2;
+                      const bridgeLeft = (cutCenter - currentDur / 2) * pps;
 
                       return (
                         <div
@@ -1836,7 +1837,7 @@ export default function Timeline(props: TimelineProps) {
                               listenForGesture(
                                 (ev) => {
                                   const dx = (startX - ev.clientX) / pps;
-                                  const nextDur = Math.max(1 / project.fps, Math.min(maxDur, snapToFrame(initDur + dx, project.fps)));
+                                  const nextDur = Math.max(1 / project.fps, Math.min(maxDur, snapToFrame(initDur + dx * 2, project.fps)));
                                   setActiveGesture({
                                     kind: "resize-transition",
                                     transitionId: trans.id,
@@ -1858,7 +1859,7 @@ export default function Timeline(props: TimelineProps) {
 
                           <div className="tl-bridge-center">
                             <span className="tl-transition-bowtie" aria-hidden="true">
-                              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
                                 <polygon points="1,2 8,8 1,14" />
                                 <polygon points="15,2 8,8 15,14" />
                               </svg>
@@ -1877,7 +1878,7 @@ export default function Timeline(props: TimelineProps) {
                               listenForGesture(
                                 (ev) => {
                                   const dx = (ev.clientX - startX) / pps;
-                                  const nextDur = Math.max(1 / project.fps, Math.min(maxDur, snapToFrame(initDur + dx, project.fps)));
+                                  const nextDur = Math.max(1 / project.fps, Math.min(maxDur, snapToFrame(initDur + dx * 2, project.fps)));
                                   setActiveGesture({
                                     kind: "resize-transition",
                                     transitionId: trans.id,
