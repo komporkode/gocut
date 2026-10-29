@@ -17,11 +17,19 @@ import {
 } from "../core/model";
 import { linkedIds, moveLinked, speedLinked, slipLinked, placeAsset, trimLinked, splitLinked, unlinkClips, rippleTrim, closeGap, setClipSpeed, createCompoundClip, ungroupCompoundClip, rippleSnapTrack, rippleSnapAllTracks, reorderClip, swapClips, separateAudio, recoverAudio, type PlacementMode } from "../core/timelineEdits";
 import { applyTransition, removeTransition, type TransitionId } from "../core/creativePresets";
+import { addTransition as addTransitionEdit, resizeTransition as resizeTransitionEdit, removeTransition as removeTransitionRecordEdit, applyTransitionToAll as applyTransitionToAllEdit } from "../core/transitionEdits";
+import type { TransitionType } from "../core/types";
 import type { Subtitle } from "../core/subtitles";
 interface EditorState {
   project: Project;
   path?: string;
   selectedIds: string[];
+  selectedTransitionId: string | null;
+  selectTransition: (id: string | null) => void;
+  addTransitionRecord: (trackId: string, fromClipId: string, toClipId: string, type: TransitionType, duration?: number) => void;
+  resizeTransitionRecord: (transitionId: string, duration: number) => void;
+  removeTransitionRecord: (transitionId: string) => void;
+  applyTransitionToAllCuts: (type: TransitionType, duration: number, trackId?: string) => void;
   playhead: number;
   playing: boolean;
   zoom: number;
@@ -372,6 +380,7 @@ export function pruneEmptyOverlayTracks(project: Project): Project {
 export const useEditorStore = create<EditorState>((set, get) => ({
   project: createProject(),
   selectedIds: [],
+  selectedTransitionId: null,
   playhead: 0,
   playing: false,
   zoom: 60,
@@ -659,6 +668,27 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const next = removeTransition(get().project, clipId);
     get().commit(next);
   },
+  selectTransition: (id) => set({ selectedTransitionId: id, selectedIds: [] }),
+  addTransitionRecord: (trackId, fromClipId, toClipId, type, duration = 0.5) => {
+    const { project, transition } = addTransitionEdit(get().project, trackId, fromClipId, toClipId, type, duration);
+    get().commit(project);
+    set({ selectedTransitionId: transition.id, selectedIds: [] });
+  },
+  resizeTransitionRecord: (transitionId, duration) => {
+    const next = resizeTransitionEdit(get().project, transitionId, duration);
+    get().commit(next);
+  },
+  removeTransitionRecord: (transitionId) => {
+    const next = removeTransitionRecordEdit(get().project, transitionId);
+    get().commit(next);
+    if (get().selectedTransitionId === transitionId) {
+      set({ selectedTransitionId: null });
+    }
+  },
+  applyTransitionToAllCuts: (type, duration, trackId) => {
+    const next = applyTransitionToAllEdit(get().project, type, duration, trackId);
+    get().commit(next);
+  },
   createCompoundClip: (clipIds) => {
     const ids = clipIds && clipIds.length ? clipIds : get().selectedIds;
     if (!ids.length) return;
@@ -882,7 +912,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       tracks: p.tracks.map((t) => (t.id === trackId ? { ...t, ...rest } : t)),
     });
   },
-  select: (selectedIds) => set({ selectedIds: linkedIds(get().project, selectedIds) }),
+  select: (selectedIds) =>
+    set({
+      selectedIds: linkedIds(get().project, selectedIds),
+      selectedTransitionId: selectedIds.length ? null : get().selectedTransitionId,
+    }),
   seek: (time) => {
     if (Number.isFinite(time))
       set({ playhead: Math.max(0, time), playing: false });
