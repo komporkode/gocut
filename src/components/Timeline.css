@@ -1089,3 +1089,132 @@
   border: 1.5px solid #818cf8 !important;
   background: linear-gradient(135deg, #1e1b4b, #312e81) !important;
 }
+
+/* CapCut 1:1 Transition Seam Cut Badge & Resizable Bridge */
+.tl-cut-badge {
+  position: absolute;
+  top: 14px;
+  width: 20px;
+  height: 20px;
+  background: rgba(24, 27, 36, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 4px;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 22;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+  padding: 0;
+}
+.tl-cut-badge:hover {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #60a5fa;
+  transform: scale(1.15);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.6);
+}
+
+.tl-transition-bridge {
+  position: absolute;
+  top: 6px;
+  height: 52px;
+  background: linear-gradient(135deg, rgba(30, 58, 138, 0.65) 0%, rgba(88, 28, 135, 0.65) 100%);
+  border: 1.5px solid rgba(147, 197, 253, 0.5);
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  z-index: 18;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  user-select: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.tl-transition-bridge:hover {
+  border-color: #60a5fa;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.75) 0%, rgba(126, 34, 206, 0.75) 100%);
+}
+.tl-transition-bridge.is-selected {
+  border: 2px solid #38bdf8 !important;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.7);
+  background: linear-gradient(135deg, rgba(14, 116, 144, 0.8) 0%, rgba(91, 33, 182, 0.8) 100%) !important;
+}
+.tl-transition-bridge.is-dragging {
+  border-color: #38bdf8;
+  opacity: 0.95;
+}
+
+.tl-bridge-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  z-index: 25;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tl-bridge-handle.is-left {
+  left: 0;
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
+}
+.tl-bridge-handle.is-right {
+  right: 0;
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+.tl-bridge-handle::after {
+  content: "";
+  width: 2px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 1px;
+  transition: background 0.15s, height 0.15s;
+}
+.tl-bridge-handle:hover::after {
+  background: #38bdf8;
+  height: 32px;
+}
+
+.tl-bridge-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  pointer-events: none;
+}
+.tl-transition-bowtie {
+  color: #e2e8f0;
+  display: flex;
+}
+.tl-bridge-duration {
+  font-size: 10px;
+  font-weight: 600;
+  color: #e0e7ff;
+  letter-spacing: -0.2px;
+}
+
+.tl-transition-drag-tooltip {
+  position: absolute;
+  top: -26px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid #38bdf8;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #38bdf8;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+  z-index: 30;
+}

@@ -257,12 +257,22 @@ type Gesture =
       insertSlot?: { insertTime: number; insertIndex: number };
     }
   | { kind: "trim"; id: string; edge: "start" | "end"; time: number }
-  | { kind: "marquee"; x: number; y: number; width: number; height: number };
+  | { kind: "marquee"; x: number; y: number; width: number; height: number }
+  | {
+      kind: "resize-transition";
+      transitionId: string;
+      edge: "start" | "end";
+      initialDuration: number;
+      currentDuration: number;
+      pointerStartX: number;
+    };
 
 export default function Timeline(props: TimelineProps) {
   const { t } = useTranslation();
   const storePlayhead = useEditorStore((s) => s.playhead);
   const storePlaying = useEditorStore((s) => s.playing);
+  const storeSelectedTransitionId = useEditorStore((s) => s.selectedTransitionId);
+  const selectTransition = useEditorStore((s) => s.selectTransition);
   const storeActiveTool = useEditorStore((s) => s.activeTool);
   const setActiveTool = useEditorStore((s) => s.setActiveTool);
   const splitAt = useEditorStore((s) => s.splitAt);
@@ -333,20 +343,23 @@ export default function Timeline(props: TimelineProps) {
   );
 
   useEffect(() => {
-    if (!selectedTransition) return;
+    const activeTransId = storeSelectedTransitionId ?? selectedTransition;
+    if (!activeTransId) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Backspace" || e.key === "Delete") {
         e.preventDefault();
         e.stopPropagation();
-        useEditorStore.getState().removeTransition(selectedTransition);
+        useEditorStore.getState().removeTransitionRecord(activeTransId);
+        selectTransition(null);
         setSelectedTransition(null);
       } else if (e.key === "Escape") {
+        selectTransition(null);
         setSelectedTransition(null);
       }
     };
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
-  }, [selectedTransition]);
+  }, [selectedTransition, storeSelectedTransitionId, selectTransition]);
 
   const setActiveGesture = (g: Gesture | null) => {
     if (g && g.kind !== "marquee" && !frozenLayoutsRef.current)
@@ -1749,76 +1762,176 @@ export default function Timeline(props: TimelineProps) {
                     />
                   )}
                 
-                {/* CapCut-style Transition Seam Badges (Non-stacking) */}
-                {clips
-                  .filter((c) => c.trackId === track.id)
-                  .map((clip, ci, trackClips) => {
+                {/* CapCut-style Transition Seam Badges & Resizable Bridges */}
+                {(() => {
+                  const trackClips = clips
+                    .filter((c) => c.trackId === track.id)
+                    .sort((a, b) => a.start - b.start);
+                  const trackTransitions = project.transitions?.filter((t) => t.trackId === track.id) ?? [];
+                  const activeTransitionId = storeSelectedTransitionId ?? selectedTransition;
+
+                  return trackClips.map((clip, ci) => {
                     const prev = trackClips[ci - 1];
-                    const hasTransition =
-                      prev &&
-                      (clip.fadeIn > 0 || prev.fadeOut > 0 || (clip.start < prev.start + prev.duration && prev.start + prev.duration - clip.start > 0.05)) &&
-                      clip.start <= prev.start + prev.duration + 0.01 &&
-                      clip.start >= prev.start + prev.duration - 5;
-                    if (!hasTransition) return null;
-                    const overlap = Math.max(0, prev.start + prev.duration - clip.start);
-                    const transDuration = Math.max(
-                      0.1,
-                      clip.fadeIn || 0,
-                      prev.fadeOut || 0,
-                      overlap
+                    if (!prev) return null;
+
+                    // 1. Check if transition exists
+                    const trans = trackTransitions.find(
+                      (t) => t.fromClipId === prev.id && t.toClipId === clip.id
                     );
-                    const transitionWidth = Math.max(20, transDuration * pps);
-                    const seamTime = overlap > 0 ? clip.start + overlap / 2 : clip.start;
-                    const transitionLeft = Math.max(0, seamTime * pps - transitionWidth / 2);
-                    const isSelected = selectedTransition === clip.id;
-                    return (
-                      <div
-                        key={`trans-${prev.id}-${clip.id}`}
-                        className={`tl-transition-block ${isSelected ? "is-selected" : ""}`}
-                        style={{
-                          left: transitionLeft,
-                          width: transitionWidth,
-                          top: 8,
-                          height: 54,
-                        }}
-                        title={`Transisi: ${transDuration.toFixed(2)}s · Klik untuk memilih, Tekan Del untuk menghapus`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSelectedTransition(clip.id);
-                          onSelect([clip.id]);
-                        }}
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setSelectedTransition(clip.id);
-                          setContextMenu({
-                            x: e.clientX,
-                            y: e.clientY,
-                            items: [
-                              {
-                                label: t("toolbar.delete") || "Hapus Transisi",
-                                icon: <Trash2 size={14} />,
-                                shortcut: "Backspace",
-                                danger: true,
-                                onClick: () => {
-                                  useEditorStore.getState().removeTransition(clip.id);
-                                  setSelectedTransition(null);
+
+                    if (trans) {
+                      const isSelected = activeTransitionId === trans.id;
+                      const isDraggingThis =
+                        gesture?.kind === "resize-transition" && gesture.transitionId === trans.id;
+                      const currentDur = isDraggingThis ? gesture.currentDuration : trans.duration;
+                      const bridgeWidth = Math.max(24, currentDur * pps);
+                      const bridgeLeft = clip.start * pps;
+
+                      return (
+                        <div
+                          key={`bridge-${trans.id}`}
+                          className={`tl-transition-bridge ${isSelected ? "is-selected" : ""} ${isDraggingThis ? "is-dragging" : ""}`}
+                          style={{
+                            left: bridgeLeft,
+                            width: bridgeWidth,
+                          }}
+                          title={`Transisi ${trans.type}: ${currentDur.toFixed(2)}s · Klik untuk memilih, Del untuk menghapus`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            selectTransition(trans.id);
+                            setSelectedTransition(trans.id);
+                          }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            selectTransition(trans.id);
+                            setSelectedTransition(trans.id);
+                            setContextMenu({
+                              x: e.clientX,
+                              y: e.clientY,
+                              items: [
+                                {
+                                  label: t("toolbar.delete") || "Hapus Transisi",
+                                  icon: <Trash2 size={14} />,
+                                  shortcut: "Backspace",
+                                  danger: true,
+                                  onClick: () => {
+                                    useEditorStore.getState().removeTransitionRecord(trans.id);
+                                    selectTransition(null);
+                                    setSelectedTransition(null);
+                                  },
                                 },
-                              },
-                            ],
-                          });
-                        }}
-                      >
-                        <div className="tl-transition-center-seam" />
-                        <span className="tl-transition-bowtie" aria-hidden="true">
-                          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                              ],
+                            });
+                          }}
+                        >
+                          {/* Left handle */}
+                          <div
+                            className="tl-bridge-handle is-left"
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              const startX = e.clientX;
+                              const initDur = trans.duration;
+                              const maxDur = Math.min(prev.duration, clip.duration);
+                              listenForGesture(
+                                (ev) => {
+                                  const dx = (startX - ev.clientX) / pps;
+                                  const nextDur = Math.max(1 / project.fps, Math.min(maxDur, snapToFrame(initDur + dx, project.fps)));
+                                  setActiveGesture({
+                                    kind: "resize-transition",
+                                    transitionId: trans.id,
+                                    edge: "start",
+                                    initialDuration: initDur,
+                                    currentDuration: nextDur,
+                                    pointerStartX: startX,
+                                  });
+                                },
+                                () => {
+                                  if (gestureRef.current?.kind === "resize-transition") {
+                                    useEditorStore.getState().resizeTransitionRecord(trans.id, gestureRef.current.currentDuration);
+                                  }
+                                  setActiveGesture(null);
+                                }
+                              );
+                            }}
+                          />
+
+                          <div className="tl-bridge-center">
+                            <span className="tl-transition-bowtie" aria-hidden="true">
+                              <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+                                <polygon points="1,2 8,8 1,14" />
+                                <polygon points="15,2 8,8 15,14" />
+                              </svg>
+                            </span>
+                            <span className="tl-bridge-duration">{currentDur.toFixed(2)}s</span>
+                          </div>
+
+                          {/* Right handle */}
+                          <div
+                            className="tl-bridge-handle is-right"
+                            onPointerDown={(e) => {
+                              e.stopPropagation();
+                              const startX = e.clientX;
+                              const initDur = trans.duration;
+                              const maxDur = Math.min(prev.duration, clip.duration);
+                              listenForGesture(
+                                (ev) => {
+                                  const dx = (ev.clientX - startX) / pps;
+                                  const nextDur = Math.max(1 / project.fps, Math.min(maxDur, snapToFrame(initDur + dx, project.fps)));
+                                  setActiveGesture({
+                                    kind: "resize-transition",
+                                    transitionId: trans.id,
+                                    edge: "end",
+                                    initialDuration: initDur,
+                                    currentDuration: nextDur,
+                                    pointerStartX: startX,
+                                  });
+                                },
+                                () => {
+                                  if (gestureRef.current?.kind === "resize-transition") {
+                                    useEditorStore.getState().resizeTransitionRecord(trans.id, gestureRef.current.currentDuration);
+                                  }
+                                  setActiveGesture(null);
+                                }
+                              );
+                            }}
+                          />
+
+                          {isDraggingThis && (
+                            <div className="tl-transition-drag-tooltip">
+                              {currentDur.toFixed(2)}s ({Math.round(currentDur * project.fps)}f)
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // 2. Cut-point badge if adjacent with 0 gap
+                    const isAdjacent = Math.abs((prev.start + prev.duration) - clip.start) <= 0.05;
+                    if (isAdjacent && track.kind === "video" && !track.locked) {
+                      const cutSeam = (prev.start + prev.duration) * pps;
+                      return (
+                        <button
+                          key={`cut-${prev.id}-${clip.id}`}
+                          className="tl-cut-badge"
+                          style={{ left: cutSeam - 10 }}
+                          title="Tambah Transisi (+)"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            useEditorStore.getState().addTransitionRecord(track.id, prev.id, clip.id, "dissolve", 0.5);
+                          }}
+                        >
+                          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
                             <polygon points="1,2 8,8 1,14" />
                             <polygon points="15,2 8,8 15,14" />
                           </svg>
-                        </span>
-                      </div>
-                    );
-                  })}
+                        </button>
+                      );
+                    }
+
+                    return null;
+                  });
+                })()}
 
                 {getTrackGaps(track.id).map((gap, gi) => {
                   const isSelected = selectedGap?.trackId === track.id && Math.abs(selectedGap.start - gap.start) < 0.01;
