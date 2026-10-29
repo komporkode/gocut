@@ -21,6 +21,11 @@ import {
   projectDuration,
 } from "../core/model";
 import {
+  computeTransitionProgress,
+  getEqualPowerGain,
+  getTransitionVisualModifier,
+} from "../core/transitionRenderer";
+import {
   imagePreviewLayer,
   textPreviewLayer,
   clearPreviewLayers,
@@ -333,6 +338,39 @@ export default function Player(props: PlayerProps) {
             ? 0
             : evaluated.volume;
         gain *= evaluateFade(clip, local, "audio");
+
+        // Transition audio equal-power crossfade
+        const transOut = p.transitions?.find((t) => t.fromClipId === clip.id);
+        const transIn = p.transitions?.find((t) => t.toClipId === clip.id);
+        const toClipForTrans = transOut ? p.clips.find((c) => c.id === transOut.toClipId) : null;
+
+        let transGainMod = 1;
+        let transAlphaMod = 1;
+        let transDx = 0;
+        let transDy = 0;
+        let transScaleMod = 1;
+
+        if (transOut && toClipForTrans && paintTime >= toClipForTrans.start && paintTime <= toClipForTrans.start + transOut.duration) {
+          const prog = computeTransitionProgress(paintTime, toClipForTrans.start, transOut.duration);
+          const { gainOut } = getEqualPowerGain(prog);
+          transGainMod *= gainOut;
+          const mod = getTransitionVisualModifier(transOut.type, prog, p.width, p.height);
+          transAlphaMod *= mod.clipA.alpha;
+          transDx += mod.clipA.dx;
+          transDy += mod.clipA.dy;
+          transScaleMod *= mod.clipA.scale;
+        } else if (transIn && paintTime >= clip.start && paintTime <= clip.start + transIn.duration) {
+          const prog = computeTransitionProgress(paintTime, clip.start, transIn.duration);
+          const { gainIn } = getEqualPowerGain(prog);
+          transGainMod *= gainIn;
+          const mod = getTransitionVisualModifier(transIn.type, prog, p.width, p.height);
+          transAlphaMod *= mod.clipB.alpha;
+          transDx += mod.clipB.dx;
+          transDy += mod.clipB.dy;
+          transScaleMod *= mod.clipB.scale;
+        }
+        gain *= transGainMod;
+
         if (source?.gain) {
           source.gain.gain.value = gain;
           media.volume = 1;
@@ -342,16 +380,22 @@ export default function Player(props: PlayerProps) {
       }
       if (!active || track.hidden || track.kind === "audio") continue;
       const alpha =
-        evaluated.transform.opacity * evaluateFade(clip, local, "video");
+        evaluated.transform.opacity * evaluateFade(clip, local, "video") * transAlphaMod;
       const movement =
         drag.current?.clip.id === clip.id ? drag.current : null;
       const tr = movement
         ? {
             ...evaluated.transform,
-            x: evaluated.transform.x + movement.dx,
-            y: evaluated.transform.y + movement.dy,
+            x: evaluated.transform.x + movement.dx + transDx,
+            y: evaluated.transform.y + movement.dy + transDy,
+            scale: evaluated.transform.scale * transScaleMod,
           }
-        : evaluated.transform;
+        : {
+            ...evaluated.transform,
+            x: evaluated.transform.x + transDx,
+            y: evaluated.transform.y + transDy,
+            scale: evaluated.transform.scale * transScaleMod,
+          };
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       ctx.translate(p.width / 2 + tr.x, p.height / 2 + tr.y);
