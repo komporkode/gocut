@@ -285,4 +285,27 @@ describe("experimental classic plaintext import", () => {
       importCapcutDraft({ tracks: Array(1001).fill({}), materials: {} }),
     ).toThrow("轨道数量");
   });
+  it("imports transitions between adjacent video segments correctly", () => {
+    const d: any = draft();
+    d.materials.transitions = [
+      { id: "tr1", name: "叠化", duration: 1_000_000 },
+    ];
+    d.tracks[0].segments.push({
+      material_id: "video",
+      target_timerange: { start: 3_000_000, duration: 2_000_000 },
+      source_timerange: { start: 0, duration: 2_000_000 },
+      extra_material_refs: ["tr1"],
+      volume: 1,
+      clip: {
+        transform: { x: 0, y: 0 },
+        scale: { x: 1, y: 1 },
+        alpha: 1,
+      },
+    });
+
+    const res = importCapcutDraft(d);
+    expect(res.project.transitions).toHaveLength(1);
+    expect(res.project.transitions![0].type).toBe("dissolve");
+    expect(res.project.transitions![0].duration).toBe(1.0);
+  });
 });

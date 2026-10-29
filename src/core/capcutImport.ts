@@ -1,4 +1,4 @@
-import type { Clip, MediaAsset, Project, TrackKind } from "./types";
+import type { Clip, MediaAsset, Project, TrackKind, TransitionType } from "./types";
 import {
   createProject,
   createTrack,
@@ -30,6 +30,20 @@ const identityUrl = (path: string) => path;
 
 /** Experimental, lossy conversion of decoded tracks/materials JSON.
  * Desktop envelope decoding is handled before this platform-neutral converter. */
+function mapCapcutTransitionType(name: string): TransitionType {
+  const n = (name || "").toLowerCase();
+  if (n.includes("dissolve") || n.includes("叠化")) return "dissolve";
+  if (n.includes("black") || n.includes("黑") || n.includes("闪黑")) return "dip";
+  if (n.includes("left") || n.includes("左")) return "slide-left";
+  if (n.includes("right") || n.includes("右")) return "slide-right";
+  if (n.includes("up") || n.includes("上")) return "slide-up";
+  if (n.includes("down") || n.includes("下")) return "slide-down";
+  if (n.includes("zoom") || n.includes("缩放")) return "zoom";
+  if (n.includes("spin") || n.includes("旋转")) return "spin";
+  if (n.includes("wipe") || n.includes("擦除")) return "wipe-left";
+  return "dissolve";
+}
+
 export function importCapcutDraft(
   input: unknown,
   options: CapcutImportOptions = {},
@@ -317,8 +331,24 @@ export function importCapcutDraft(
         warn("剪映关键帧未映射，保留片段的静态参数。");
       for (const ref of refs) {
         const extra = materialById.get(ref);
-        if (extra && extra.category !== "speeds")
+        if (extra && extra.category === "transitions") {
+          const trackClips = project.clips.filter((c) => c.trackId === track.id);
+          const prevClip = trackClips[trackClips.length - 1];
+          if (prevClip) {
+            const dur = Math.max(0.1, seconds(extra.data.duration) || 0.5);
+            project.transitions = project.transitions ?? [];
+            project.transitions.push({
+              id: id(),
+              trackId: track.id,
+              fromClipId: prevClip.id,
+              toClipId: clip.id,
+              type: mapCapcutTransitionType(string(extra.data.name)),
+              duration: dur,
+            });
+          }
+        } else if (extra && extra.category !== "speeds") {
           unmappedSettings.add(settingNames[extra.category] ?? "其他附加效果");
+        }
         if (
           extra?.category === "speeds" &&
           array(extra.data.curve_speed).length

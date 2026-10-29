@@ -311,6 +311,37 @@ export default function Player(props: PlayerProps) {
           }
         }
       }
+      // Transition modifiers (audio gain and visual transform/alpha)
+      const transOut = p.transitions?.find((t) => t.fromClipId === clip.id);
+      const transIn = p.transitions?.find((t) => t.toClipId === clip.id);
+      const toClipForTrans = transOut ? p.clips.find((c) => c.id === transOut.toClipId) : null;
+
+      let transGainMod = 1;
+      let transAlphaMod = 1;
+      let transDx = 0;
+      let transDy = 0;
+      let transScaleMod = 1;
+
+      if (transOut && toClipForTrans && paintTime >= toClipForTrans.start && paintTime <= toClipForTrans.start + transOut.duration) {
+        const prog = computeTransitionProgress(paintTime, toClipForTrans.start, transOut.duration);
+        const { gainOut } = getEqualPowerGain(prog);
+        transGainMod *= gainOut;
+        const mod = getTransitionVisualModifier(transOut.type, prog, p.width, p.height);
+        transAlphaMod *= mod.clipA.alpha;
+        transDx += mod.clipA.dx;
+        transDy += mod.clipA.dy;
+        transScaleMod *= mod.clipA.scale;
+      } else if (transIn && paintTime >= clip.start && paintTime <= clip.start + transIn.duration) {
+        const prog = computeTransitionProgress(paintTime, clip.start, transIn.duration);
+        const { gainIn } = getEqualPowerGain(prog);
+        transGainMod *= gainIn;
+        const mod = getTransitionVisualModifier(transIn.type, prog, p.width, p.height);
+        transAlphaMod *= mod.clipB.alpha;
+        transDx += mod.clipB.dx;
+        transDy += mod.clipB.dy;
+        transScaleMod *= mod.clipB.scale;
+      }
+
       if (media instanceof HTMLMediaElement) {
         if (!active) {
           media.pause();
@@ -338,37 +369,6 @@ export default function Player(props: PlayerProps) {
             ? 0
             : evaluated.volume;
         gain *= evaluateFade(clip, local, "audio");
-
-        // Transition audio equal-power crossfade
-        const transOut = p.transitions?.find((t) => t.fromClipId === clip.id);
-        const transIn = p.transitions?.find((t) => t.toClipId === clip.id);
-        const toClipForTrans = transOut ? p.clips.find((c) => c.id === transOut.toClipId) : null;
-
-        let transGainMod = 1;
-        let transAlphaMod = 1;
-        let transDx = 0;
-        let transDy = 0;
-        let transScaleMod = 1;
-
-        if (transOut && toClipForTrans && paintTime >= toClipForTrans.start && paintTime <= toClipForTrans.start + transOut.duration) {
-          const prog = computeTransitionProgress(paintTime, toClipForTrans.start, transOut.duration);
-          const { gainOut } = getEqualPowerGain(prog);
-          transGainMod *= gainOut;
-          const mod = getTransitionVisualModifier(transOut.type, prog, p.width, p.height);
-          transAlphaMod *= mod.clipA.alpha;
-          transDx += mod.clipA.dx;
-          transDy += mod.clipA.dy;
-          transScaleMod *= mod.clipA.scale;
-        } else if (transIn && paintTime >= clip.start && paintTime <= clip.start + transIn.duration) {
-          const prog = computeTransitionProgress(paintTime, clip.start, transIn.duration);
-          const { gainIn } = getEqualPowerGain(prog);
-          transGainMod *= gainIn;
-          const mod = getTransitionVisualModifier(transIn.type, prog, p.width, p.height);
-          transAlphaMod *= mod.clipB.alpha;
-          transDx += mod.clipB.dx;
-          transDy += mod.clipB.dy;
-          transScaleMod *= mod.clipB.scale;
-        }
         gain *= transGainMod;
 
         if (source?.gain) {

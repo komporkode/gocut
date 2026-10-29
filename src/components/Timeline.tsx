@@ -1119,7 +1119,7 @@ export default function Timeline(props: TimelineProps) {
             useEditorStore.getState().commit({ ...project, clips: updatedClips });
           }
           try {
-            useEditorStore.getState().applyTransition(frontTarget.id, transitionId, duration);
+            useEditorStore.getState().addTransitionRecord(track.id, frontTarget.id, nClip.id, transitionId, duration);
           } catch (err) {
             console.warn("Could not apply transition between clips:", err);
           }
