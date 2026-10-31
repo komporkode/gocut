@@ -208,6 +208,30 @@ func (a *App) GetRecentProjects() ([]project.RecentEntry, error) {
 	return a.storage.GetRecent()
 }
 
+func (a *App) ListProjects() ([]project.ProjectEntry, error) {
+	return a.storage.ListProjects()
+}
+
+func (a *App) CreateProject(name string) (project.ProjectEntry, error) {
+	return a.storage.CreateProject(name)
+}
+
+func (a *App) DuplicateProject(projectPath string) (project.ProjectEntry, error) {
+	return a.storage.DuplicateProject(projectPath)
+}
+
+func (a *App) RenameProject(projectPath string, newName string) (project.ProjectEntry, error) {
+	return a.storage.RenameProject(projectPath, newName)
+}
+
+func (a *App) DeleteProject(projectPath string) error {
+	return a.storage.DeleteProject(projectPath)
+}
+
+func (a *App) SaveProjectCover(projectPath string, base64Data string) error {
+	return a.storage.SaveProjectCover(projectPath, base64Data)
+}
+
 func (a *App) ChooseMediaFiles() ([]string, error) {
 	paths, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Import Media",

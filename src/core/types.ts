@@ -187,6 +187,15 @@ export interface RecentProject {
   name: string;
   updatedAt: string;
 }
+export interface ProjectInfo {
+  id: string;
+  name: string;
+  path: string;
+  cover?: string;
+  sizeBytes: number;
+  duration: number;
+  updatedAt: string;
+}
 export interface CapcutImportSelection {
   token: string;
   name: string;
@@ -234,6 +243,12 @@ export interface EditorAPI {
   autosaveProject: (project: Project) => Promise<void>;
   getAutosave: () => Promise<Project | null>;
   getRecentProjects: () => Promise<RecentProject[]>;
+  listProjects: () => Promise<ProjectInfo[]>;
+  createProject: (name: string) => Promise<{ project: Project; path: string }>;
+  duplicateProject: (path: string) => Promise<ProjectInfo>;
+  renameProject: (path: string, newName: string) => Promise<ProjectInfo>;
+  deleteProject: (path: string) => Promise<boolean>;
+  saveProjectCover: (projectPath: string, coverBase64: string) => Promise<void>;
   openRecentProject: (
     path: string,
   ) => Promise<{ project: Project; path: string }>;

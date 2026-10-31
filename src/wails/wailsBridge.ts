@@ -6,11 +6,15 @@ import type {
   MediaAsset,
   MediaKind,
   Project,
+  ProjectInfo,
   RecentProject,
 } from "../core/types";
 import { flattenCompoundClips } from "../core/timelineEdits";
+import { createProject as createCoreProject } from "../core/model";
 import * as App from "../../wailsjs/go/main/App";
 import * as Runtime from "../../wailsjs/runtime/runtime";
+
+let mockProjects: ProjectInfo[] = [];
 
 export function isWailsEnvironment(): boolean {
   return (
@@ -224,6 +228,116 @@ export function createWailsBridge(): EditorAPI {
       }
     },
 
+    listProjects: async (): Promise<ProjectInfo[]> => {
+      if (isWailsEnvironment()) {
+        try {
+          const items = await (App as unknown as { ListProjects?: () => Promise<ProjectInfo[]> }).ListProjects?.();
+          if (items) return items;
+        } catch {
+          /* fallback */
+        }
+      }
+      return [...mockProjects];
+    },
+
+    createProject: async (name: string) => {
+      const p = createCoreProject(name);
+      const safePath = `/projects/${name.replace(/[^\w-]/g, "_")}-${Date.now()}.reacut`;
+      const info: ProjectInfo = {
+        id: p.id,
+        name: p.name,
+        path: safePath,
+        sizeBytes: 1024,
+        duration: 0,
+        updatedAt: new Date().toISOString(),
+      };
+      mockProjects = [info, ...mockProjects.filter(x => x.path !== safePath)];
+      if (isWailsEnvironment()) {
+        try {
+          await (App as unknown as { CreateProject?: (n: string) => Promise<unknown> }).CreateProject?.(name);
+        } catch {
+          /* ignore */
+        }
+      }
+      return { project: p, path: safePath };
+    },
+
+    duplicateProject: async (path: string): Promise<ProjectInfo> => {
+      const orig = mockProjects.find(p => p.path === path);
+      const newName = orig ? `${orig.name} Copy` : "Duplicated Project Copy";
+      const newPath = `/projects/${newName.replace(/[^\w-]/g, "_")}-${Date.now()}.reacut`;
+      const duplicated: ProjectInfo = {
+        id: `dup-${Date.now()}`,
+        name: newName,
+        path: newPath,
+        cover: orig?.cover,
+        sizeBytes: orig?.sizeBytes ?? 1024,
+        duration: orig?.duration ?? 0,
+        updatedAt: new Date().toISOString(),
+      };
+      mockProjects = [duplicated, ...mockProjects];
+      if (isWailsEnvironment()) {
+        try {
+          const res = await (App as unknown as { DuplicateProject?: (p: string) => Promise<ProjectInfo> }).DuplicateProject?.(path);
+          if (res) return res;
+        } catch {
+          /* fallback */
+        }
+      }
+      return duplicated;
+    },
+
+    renameProject: async (path: string, newName: string): Promise<ProjectInfo> => {
+      const found = mockProjects.find(p => p.path === path);
+      if (found) {
+        found.name = newName;
+        found.updatedAt = new Date().toISOString();
+      }
+      if (isWailsEnvironment()) {
+        try {
+          const res = await (App as unknown as { RenameProject?: (p: string, n: string) => Promise<ProjectInfo> }).RenameProject?.(path, newName);
+          if (res) return res;
+        } catch {
+          /* fallback */
+        }
+      }
+      return found || {
+        id: "renamed",
+        name: newName,
+        path,
+        sizeBytes: 1024,
+        duration: 0,
+        updatedAt: new Date().toISOString(),
+      };
+    },
+
+    deleteProject: async (path: string): Promise<boolean> => {
+      mockProjects = mockProjects.filter(p => p.path !== path);
+      if (isWailsEnvironment()) {
+        try {
+          await (App as unknown as { DeleteProject?: (p: string) => Promise<void> }).DeleteProject?.(path);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      return true;
+    },
+
+    saveProjectCover: async (projectPath: string, coverBase64: string): Promise<void> => {
+      const target = mockProjects.find(p => p.path === projectPath);
+      if (target) {
+        target.cover = coverBase64;
+      }
+      if (isWailsEnvironment()) {
+        try {
+          await (App as unknown as { SaveProjectCover?: (p: string, c: string) => Promise<void> }).SaveProjectCover?.(projectPath, coverBase64);
+        } catch {
+          /* fallback */
+        }
+      }
+    },
+
     openRecentProject: async (path: string) => {
       const res = await App.OpenProject(path);
       if (!res || !res.json) throw new Error("Failed to open project: " + path);
@@ -363,4 +477,9 @@ export function createWailsBridge(): EditorAPI {
       });
     },
   };
+}
+
+export const editorAPI: EditorAPI = createWailsBridge();
+if (typeof window !== "undefined" && !window.editorAPI) {
+  window.editorAPI = editorAPI;
 }
