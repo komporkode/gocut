@@ -146,12 +146,67 @@ function Slider({
     </div>
   );
 }
+function AlignLeftIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <line x1="3" y1="2" x2="3" y2="14" />
+      <rect x="6" y="5" width="7" height="6" rx="1" fill="currentColor" fillOpacity="0.2" />
+    </svg>
+  );
+}
+
+function AlignCenterHIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <line x1="8" y1="2" x2="8" y2="14" />
+      <rect x="4.5" y="5" width="7" height="6" rx="1" fill="currentColor" fillOpacity="0.2" />
+    </svg>
+  );
+}
+
+function AlignRightIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <line x1="13" y1="2" x2="13" y2="14" />
+      <rect x="3" y="5" width="7" height="6" rx="1" fill="currentColor" fillOpacity="0.2" />
+    </svg>
+  );
+}
+
+function AlignTopIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <line x1="2" y1="3" x2="14" y2="3" />
+      <rect x="5" y="6" width="6" height="7" rx="1" fill="currentColor" fillOpacity="0.2" />
+    </svg>
+  );
+}
+
+function AlignCenterVIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <line x1="2" y1="8" x2="14" y2="8" />
+      <rect x="5" y="4.5" width="6" height="7" rx="1" fill="currentColor" fillOpacity="0.2" />
+    </svg>
+  );
+}
+
+function AlignBottomIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <line x1="2" y1="13" x2="14" y2="13" />
+      <rect x="5" y="3" width="6" height="7" rx="1" fill="currentColor" fillOpacity="0.2" />
+    </svg>
+  );
+}
+
 export default function Inspector(props: Props) {
   const { t } = useTranslation();
   const storePlayhead = useEditorStore((s) => s.playhead);
   const playhead = props.playhead ?? storePlayhead;
   const { project, clip, onUpdate, onProjectUpdate } = props;
   const [tab, setTab] = useState("画面"),
+    [uniformScale, setUniformScale] = useState(true),
     [fonts, setFonts] = useState<string[]>([
       "Noto Sans SC",
       "sans-serif",
@@ -369,12 +424,12 @@ export default function Inspector(props: Props) {
             {pictureTabs.map((pt) => (
               <button
                 key={pt}
-                aria-label={tabLabel(pt)}
+                aria-label={pt === "画面" ? t("inspector.tabBasic") : tabLabel(pt)}
                 aria-pressed={tab === pt}
                 className={tab === pt ? "active" : ""}
                 onClick={() => setTab(pt)}
               >
-                {tabLabel(pt)}
+                {pt === "画面" ? t("inspector.tabBasic") : tabLabel(pt)}
               </button>
             ))}
           </nav>
@@ -447,6 +502,19 @@ export default function Inspector(props: Props) {
                 onChange={(v) => animate("scale", v / 100)}
                 diamond={() => key("scale", evaluated.transform.scale)}
               />
+              <div className="property-row uniform-scale-row">
+                <span>{t("inspector.uniformScale")}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={uniformScale}
+                  aria-label={t("inspector.uniformScale")}
+                  className={`toggle-switch ${uniformScale ? "is-on" : ""}`}
+                  onClick={() => setUniformScale(!uniformScale)}
+                >
+                  <span className="toggle-thumb" />
+                </button>
+              </div>
               <div className="position-fields">
               <NumberField
                 label={`${t("inspector.position")} X`}
@@ -470,6 +538,65 @@ export default function Inspector(props: Props) {
                 onChange={(v) => animate("rotation", v)}
                 diamond={() => key("rotation", evaluated.transform.rotation)}
               />
+              <div className="inspector-align-toolbar" aria-label="Transform Alignment" data-testid="inspector-align-toolbar">
+                <button
+                  type="button"
+                  title={t("inspector.alignLeft")}
+                  aria-label={t("inspector.alignLeft")}
+                  onClick={() => animate("x", -project.width / 4)}
+                >
+                  <AlignLeftIcon />
+                </button>
+                <button
+                  type="button"
+                  title={t("inspector.alignCenterH")}
+                  aria-label={t("inspector.alignCenterH")}
+                  onClick={() => animate("x", 0)}
+                >
+                  <AlignCenterHIcon />
+                </button>
+                <button
+                  type="button"
+                  title={t("inspector.alignRight")}
+                  aria-label={t("inspector.alignRight")}
+                  onClick={() => animate("x", project.width / 4)}
+                >
+                  <AlignRightIcon />
+                </button>
+                <button
+                  type="button"
+                  title={t("inspector.alignTop")}
+                  aria-label={t("inspector.alignTop")}
+                  onClick={() => animate("y", -project.height / 4)}
+                >
+                  <AlignTopIcon />
+                </button>
+                <button
+                  type="button"
+                  title={t("inspector.alignCenterV")}
+                  aria-label={t("inspector.alignCenterV")}
+                  onClick={() => animate("y", 0)}
+                >
+                  <AlignCenterVIcon />
+                </button>
+                <button
+                  type="button"
+                  title={t("inspector.alignBottom")}
+                  aria-label={t("inspector.alignBottom")}
+                  onClick={() => animate("y", project.height / 4)}
+                >
+                  <AlignBottomIcon />
+                </button>
+              </div>
+              <div className="section-title" style={{ marginTop: 14 }}>
+                <h3>{t("inspector.opacity")}</h3>
+                <button
+                  title={t("inspector.reset")}
+                  onClick={() => animate("opacity", 1)}
+                >
+                  <RotateCcw size={13} />
+                </button>
+              </div>
               <NumberField
                 label={t("inspector.opacity")}
                 value={evaluated.transform.opacity * 100}

@@ -1340,6 +1340,38 @@ export default function App() {
                   {t("toolbar.importCapcutFolder")}<span>{t("toolbar.experimental")}</span>
                 </button>
                 <hr />
+                <button
+                  onClick={() => {
+                    setLayoutMode("classic");
+                    try { localStorage.setItem("gocut-layout-mode", "classic"); } catch {}
+                    setFileMenu(false);
+                  }}
+                >
+                  <span>{layoutMode === "classic" ? "✓ " : "  "}{t("menu.layoutDefault")}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setLayoutMode("studio");
+                    try { localStorage.setItem("gocut-layout-mode", "studio"); } catch {}
+                    setFileMenu(false);
+                  }}
+                >
+                  <span>{layoutMode === "studio" ? "✓ " : "  "}{t("menu.layoutVertical")}</span>
+                </button>
+                <button
+                  onClick={() => {
+                    try {
+                      localStorage.removeItem("reacut-panel-widths-v1");
+                      localStorage.removeItem("gocut-studio-player-width");
+                    } catch {}
+                    setLayoutMode("classic");
+                    setFileMenu(false);
+                    notify(t("menu.resetLayout"));
+                  }}
+                >
+                  <span>{t("menu.resetLayout")}</span>
+                </button>
+                <hr />
                 <button onClick={() => { setFileMenu(false); setModal("settings"); }}>{t("toolbar.settings")}</button>
                 <button onClick={() => { setFileMenu(false); setModal("shortcuts") }}>{t("toolbar.shortcuts")}</button>
               </div>
