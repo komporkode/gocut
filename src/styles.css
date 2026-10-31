@@ -223,6 +223,19 @@ h3:first-child {
   background: #272727;
   color: #ffffff;
 }
+.autosave-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: #00f2fe;
+  background: rgba(0, 242, 254, 0.08);
+  border: 1px solid rgba(0, 242, 254, 0.2);
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-weight: 500;
+  margin-left: 6px;
+}
 .project-title {
   position: absolute;
   left: 50%;

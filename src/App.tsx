@@ -13,6 +13,7 @@ import {
   FilePlus2,
   FolderOpen,
   Globe,
+  Home,
   Info,
   Keyboard,
   LoaderCircle,
@@ -61,6 +62,7 @@ import type { BuiltinAsset } from "./core/builtinAssets";
 import MediaLibrary from "./components/MediaLibrary";
 import SourcePreview from "./components/SourcePreview";
 import EditorWorkspace from "./components/EditorWorkspace";
+import ProjectDashboard from "./components/ProjectDashboard";
 import { captureVideoFrame } from "./core/mediaThumbnail";
 import Timeline from "./components/Timeline";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -552,6 +554,7 @@ export default function App() {
 
   const [speechMode, setSpeechMode] = useState<"asr" | "tts" | null>(null);
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [currentView, setCurrentView] = useState<"dashboard" | "editor">("dashboard");
   const [studioPlayerWidth, setStudioPlayerWidth] = useState<number>(() => {
     try {
       const saved = localStorage.getItem("gocut-studio-player-width");
@@ -726,6 +729,7 @@ export default function App() {
         }
         if (startup) {
           s.setProject(startup.project, startup.path);
+          setCurrentView("editor");
           setInitialized(true);
           return;
         }
@@ -829,16 +833,55 @@ export default function App() {
       return;
     }
     const result = await window.editorAPI.openProject();
-    if (result) s.setProject(result.project, result.path);
+    if (result) {
+      s.setProject(result.project, result.path);
+      setCurrentView("editor");
+    }
   };
   const newProject = () => {
-    if (confirmReplace()) s.setProject(createProject());
+    if (confirmReplace()) {
+      s.setProject(createProject());
+      setCurrentView("editor");
+    }
   };
+
+  const handleOpenProject = async (path: string) => {
+    if (window.editorAPI) {
+      try {
+        const res = await window.editorAPI.openRecentProject(path);
+        s.setProject(res.project, res.path);
+        setCurrentView("editor");
+        return;
+      } catch (err) {
+        notify(`Gagal membuka proyek: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    s.setProject(createProject("Untitled Project"), path);
+    setCurrentView("editor");
+  };
+
+  const handleNewProject = () => {
+    s.setProject(createProject());
+    setCurrentView("editor");
+  };
+
+  const handleBackToHome = async () => {
+    try {
+      if (window.editorAPI && s.path) {
+        await window.editorAPI.autosaveProject(s.project);
+      }
+    } catch {}
+    setCurrentView("dashboard");
+  };
+
   const handleAction = async (action: string) => {
     // Native menu accelerators bypass DOM key handlers; keep modal workflows intact.
     if ((modal || speechMode || recover) && action !== "save-and-close") return;
     setFileMenu(false);
     switch (action) {
+      case "back-home":
+        await handleBackToHome();
+        break;
       case "new":
         newProject();
         break;
@@ -1224,6 +1267,16 @@ export default function App() {
       ? `Added ${result.duration.toFixed(2)}s dissolve transition`
       : `Added ${result.duration.toFixed(2)}s transition`);
   };
+  if (currentView === "dashboard") {
+    return (
+      <ProjectDashboard
+        onOpenProject={(path) => void safe(() => handleOpenProject(path))}
+        onNewProject={handleNewProject}
+        onOpenExternalFile={() => void safe(open)}
+      />
+    );
+  }
+
   return (
     <div
       className={`app-shell ${layoutMode === "studio" ? "layout-studio" : "layout-classic"}`}
@@ -1261,14 +1314,23 @@ export default function App() {
         <div className="titlebar-menus">
           <div className="file-menu-container">
             <button
-              aria-label={t("toolbar.fileMenu.aria")}
+              aria-label="Menu"
+              className="menu-trigger-btn"
               onClick={() => setFileMenu(!fileMenu)}
             >
-              {t("toolbar.file")}
+              Menu
               <ChevronDown size={12} />
             </button>
             {fileMenu && (
               <div className="file-menu">
+                <button
+                  onClick={() => void safe(() => handleAction("back-home"))}
+                  style={{ color: "#00f2fe", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}
+                >
+                  <Home size={14} />
+                  <span>{t("menu.backToHome")}</span>
+                </button>
+                <hr />
                 {[
                   ["new", t("toolbar.newProject"), "⌘N"],
                   ["open", t("toolbar.openProject"), "⌘O"],
@@ -1293,10 +1355,16 @@ export default function App() {
                 <button onClick={() => void safe(() => importDraft("directory"))}>
                   {t("toolbar.importCapcutFolder")}<span>{t("toolbar.experimental")}</span>
                 </button>
+                <hr />
+                <button onClick={() => { setFileMenu(false); setModal("settings"); }}>{t("toolbar.settings")}</button>
+                <button onClick={() => { setFileMenu(false); setModal("shortcuts") }}>{t("toolbar.shortcuts")}</button>
               </div>
             )}
           </div>
-          <button onClick={() => setModal("shortcuts")}>{t("toolbar.shortcuts")}</button>
+          <div className="autosave-status-pill">
+            <Check size={12} />
+            <span>{t("common.autoSaved")}</span>
+          </div>
         </div>
         <div className="project-title">
           <input
