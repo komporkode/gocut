@@ -1057,29 +1057,13 @@ export default function App() {
             state.setActiveTool("razor");
             break;
           case "q":
-          case "Q": {
-            const targetClips = state.selectedIds.length
-              ? state.project.clips.filter((c) => state.selectedIds.includes(c.id))
-              : state.project.clips.filter(
-                  (c) => c.start < state.playhead && c.start + c.duration > state.playhead,
-                );
-            for (const c of targetClips) {
-              state.rippleTrim(c.id, "start", state.playhead);
-            }
+          case "Q":
+            state.trimLeftAtPlayhead();
             break;
-          }
           case "w":
-          case "W": {
-            const targetClips = state.selectedIds.length
-              ? state.project.clips.filter((c) => state.selectedIds.includes(c.id))
-              : state.project.clips.filter(
-                  (c) => c.start < state.playhead && c.start + c.duration > state.playhead,
-                );
-            for (const c of targetClips) {
-              state.rippleTrim(c.id, "end", state.playhead);
-            }
+          case "W":
+            state.trimRightAtPlayhead();
             break;
-          }
           case "j":
           case "J": {
             if (state.playing) {
@@ -1611,6 +1595,19 @@ export default function App() {
                 onRedo={s.redo}
                 canUndo={pastLength > 0}
                 canRedo={futureLength > 0}
+                onTrimLeft={() => s.trimLeftAtPlayhead()}
+                onTrimRight={() => s.trimRightAtPlayhead()}
+                onReverse={() => { s.setPlaying(false); setModal("reverse"); }}
+                onFreeze={() => { s.setPlaying(false); setModal("freeze"); }}
+                onSeparateAudio={() => void safe(detachAudio)}
+                onCrop={() => {
+                  const el = document.querySelector(".inspector") as HTMLElement;
+                  el?.scrollIntoView({ behavior: "smooth" });
+                }}
+                onSpeed={() => {
+                  const el = document.querySelector(".inspector") as HTMLElement;
+                  el?.scrollIntoView({ behavior: "smooth" });
+                }}
               />
             </ErrorBoundary>
           </div>

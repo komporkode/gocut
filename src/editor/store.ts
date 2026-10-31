@@ -15,7 +15,7 @@ import {
   snapToFrame,
   validateProject,
 } from "../core/model";
-import { linkedIds, moveLinked, speedLinked, slipLinked, placeAsset, trimLinked, splitLinked, unlinkClips, rippleTrim, closeGap, setClipSpeed, createCompoundClip, ungroupCompoundClip, rippleSnapTrack, rippleSnapAllTracks, reorderClip, swapClips, separateAudio, recoverAudio, type PlacementMode } from "../core/timelineEdits";
+import { linkedIds, moveLinked, speedLinked, slipLinked, placeAsset, trimLinked, splitLinked, unlinkClips, rippleTrim, closeGap, setClipSpeed, createCompoundClip, ungroupCompoundClip, rippleSnapTrack, rippleSnapAllTracks, reorderClip, swapClips, separateAudio, recoverAudio, trimClipLeftAtPlayhead, trimClipRightAtPlayhead, type PlacementMode } from "../core/timelineEdits";
 import { applyTransition, removeTransition, type TransitionId } from "../core/creativePresets";
 import { addTransition as addTransitionEdit, resizeTransition as resizeTransitionEdit, removeTransition as removeTransitionRecordEdit, applyTransitionToAll as applyTransitionToAllEdit } from "../core/transitionEdits";
 import type { TransitionType } from "../core/types";
@@ -72,6 +72,8 @@ interface EditorState {
   split: () => void;
   splitAt: (clipId: string, time: number) => void;
   rippleTrim: (clipId: string, edge: "start" | "end", time?: number) => void;
+  trimLeftAtPlayhead: (clipId?: string) => void;
+  trimRightAtPlayhead: (clipId?: string) => void;
   closeGap: (trackId: string, atTime: number) => void;
   setClipSpeed: (clipId: string, speed: number, ripple?: boolean) => void;
   applyTransition: (clipId: string, transition: TransitionId, seconds?: number) => void;
@@ -730,6 +732,24 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       set({ selectedIds: [clipId] });
     } catch (e) {
       console.error("recoverAudio error:", e);
+    }
+  },
+  trimLeftAtPlayhead: (clipId) => {
+    const s = get(), p = s.project;
+    const targetId = clipId ?? s.selectedIds[0] ?? p.clips.find(c => c.start < s.playhead && c.start + c.duration > s.playhead && !p.tracks.find(t => t.id === c.trackId)?.locked)?.id;
+    if (!targetId) return;
+    const next = trimClipLeftAtPlayhead(p, targetId, s.playhead, s.magnetic);
+    if (next !== p) {
+      get().commit(next);
+    }
+  },
+  trimRightAtPlayhead: (clipId) => {
+    const s = get(), p = s.project;
+    const targetId = clipId ?? s.selectedIds[0] ?? p.clips.find(c => c.start < s.playhead && c.start + c.duration > s.playhead && !p.tracks.find(t => t.id === c.trackId)?.locked)?.id;
+    if (!targetId) return;
+    const next = trimClipRightAtPlayhead(p, targetId, s.playhead);
+    if (next !== p) {
+      get().commit(next);
     }
   },
   deleteSelected: () => {

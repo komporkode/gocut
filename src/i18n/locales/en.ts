@@ -100,6 +100,8 @@ export const en: Record<TranslationKey, string> = {
   "toolbar.undo": "Undo",
   "toolbar.redo": "Redo",
   "toolbar.split": "Split Clip",
+  "toolbar.crop": "Crop",
+  "toolbar.speed": "Speed",
   "toolbar.delete": "Delete",
   "toolbar.snapping": "Snapping",
   "toolbar.magnetic": "Magnetic Timeline",

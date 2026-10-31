@@ -102,6 +102,8 @@ export const id: Record<TranslationKey, string> = {
   "toolbar.undo": "Urungkan",
   "toolbar.redo": "Ulangi",
   "toolbar.split": "Bagi Klip",
+  "toolbar.crop": "Pangkas Gambar",
+  "toolbar.speed": "Kecepatan",
   "toolbar.delete": "Hapus",
   "toolbar.snapping": "Snapping (Magnetik)",
   "toolbar.magnetic": "Garis Waktu Magnetik",

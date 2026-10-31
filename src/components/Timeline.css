@@ -37,9 +37,10 @@
   opacity: 0.28;
   cursor: default;
 }
-.tl button.is-active {
-  background: rgba(99, 59, 251, 0.2);
-  color: #a78bfa;
+.tl button.is-active,
+.tl button.tl-btn-active {
+  background: rgba(0, 240, 208, 0.14);
+  color: #00f0d0;
 }
 .tl-toolbar {
   height: 42px;
@@ -47,16 +48,41 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 13px;
-  gap: 16px;
-  background: #292929;
-  border-bottom: 1px solid #171717;
+  padding: 0 12px;
+  gap: 12px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #141414;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.tl-toolbar::-webkit-scrollbar {
+  display: none;
 }
 .tl-toolbar-group,
 .tl-toolbar-end {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+}
+.tl-toolbar-contextual {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  padding: 2px 4px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  animation: tlFadeIn 0.15s ease-out;
+}
+@keyframes tlFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 .tl-divider {
   width: 1px;

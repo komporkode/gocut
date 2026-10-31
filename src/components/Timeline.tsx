@@ -11,20 +11,25 @@ import {
   ArrowUp,
   ChevronDown,
   Copy,
+  Crop,
   Eye,
   EyeOff,
   Film,
+  Gauge,
   Layers,
   LockKeyhole,
   Link2,
   Magnet,
+  Maximize2,
   MoreHorizontal,
   MousePointer2,
   Music2,
   Pencil,
   Plus,
   Redo2,
+  RotateCcw,
   Scissors,
+  Snowflake,
   Trash2,
   Type,
   Undo2,
@@ -72,6 +77,13 @@ export interface TimelineProps {
   onRedo?: () => void;
   canUndo?: boolean;
   canRedo?: boolean;
+  onTrimLeft?: () => void;
+  onTrimRight?: () => void;
+  onReverse?: () => void;
+  onFreeze?: () => void;
+  onSeparateAudio?: () => void;
+  onCrop?: () => void;
+  onSpeed?: () => void;
 }
 
 const GUTTER = 170;
@@ -267,6 +279,34 @@ type Gesture =
       pointerStartX: number;
     };
 
+function TrimLeftIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 3.5h3v9H4" />
+      <line x1="12" y1="2.5" x2="12" y2="13.5" />
+    </svg>
+  );
+}
+
+function SplitCenterIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3.5 4h2v8h-2" />
+      <line x1="8" y1="2" x2="8" y2="14" />
+      <path d="M12.5 4h-2v8h2" />
+    </svg>
+  );
+}
+
+function TrimRightIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="4" y1="2.5" x2="4" y2="13.5" />
+      <path d="M12 3.5H9v9h3" />
+    </svg>
+  );
+}
+
 export default function Timeline(props: TimelineProps) {
   const { t } = useTranslation();
   const storePlayhead = useEditorStore((s) => s.playhead);
@@ -283,6 +323,9 @@ export default function Timeline(props: TimelineProps) {
   const separateAudio = useEditorStore((s) => s.separateAudio);
   const recoverAudio = useEditorStore((s) => s.recoverAudio);
   const ungroupCompoundClip = useEditorStore((s) => s.ungroupCompoundClip);
+  const trimLeftAtPlayhead = useEditorStore((s) => s.trimLeftAtPlayhead);
+  const trimRightAtPlayhead = useEditorStore((s) => s.trimRightAtPlayhead);
+  const duplicate = useEditorStore((s) => s.duplicate);
   const activeTool = storeActiveTool ?? "select";
   const [selectedGap, setSelectedGap] = useState<{ trackId: string; start: number } | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -1192,6 +1235,36 @@ export default function Timeline(props: TimelineProps) {
   };
 
 
+  const activeClip = selectedIds.length
+    ? project.clips.find((c) => selectedIds.includes(c.id))
+    : null;
+  const activeClipAsset = activeClip
+    ? project.assets.find((a) => a.id === activeClip.assetId)
+    : null;
+  const activeTrack = activeClip
+    ? project.tracks.find((t) => t.id === activeClip.trackId)
+    : null;
+  const isVideoClip = activeClipAsset?.kind === "video";
+  const hasAudioSeparable = !!(
+    isVideoClip &&
+    activeClipAsset?.hasAudio &&
+    !activeClip?.linkId
+  );
+  const canSplitAtPlayhead = project.clips.some(
+    (c) =>
+      !project.tracks.find((t) => t.id === c.trackId)?.locked &&
+      (!selectedIds.length || selectedIds.includes(c.id)) &&
+      c.start < playhead &&
+      c.start + c.duration > playhead,
+  );
+  const canTrimAtPlayhead = project.clips.some(
+    (c) =>
+      !project.tracks.find((t) => t.id === c.trackId)?.locked &&
+      (!selectedIds.length || selectedIds.includes(c.id)) &&
+      c.start < playhead &&
+      c.start + c.duration > playhead,
+  );
+
   return (
     <section
       className={`tl ${activeTool === "razor" ? "is-razor-tool" : ""}`}
@@ -1203,25 +1276,15 @@ export default function Timeline(props: TimelineProps) {
         } as CSSProperties
       }
     >
-      <div className="tl-toolbar">
+      <div className="tl-toolbar" data-testid="timeline-toolbar">
         <div className="tl-toolbar-group">
           <button
-            title={`${t("toolbar.undo")} · ⌘Z`}
-            aria-label={t("toolbar.undo")}
-            onClick={props.onUndo}
-            disabled={!props.canUndo}
+            title={t("timeline.addTrack")}
+            aria-label={t("timeline.addTrack")}
+            onClick={() => props.onAddTrack("video")}
           >
-            <Undo2 size={17} />
+            <Plus size={16} />
           </button>
-          <button
-            title={`${t("toolbar.redo")} · ⇧⌘Z`}
-            aria-label={t("toolbar.redo")}
-            onClick={props.onRedo}
-            disabled={!props.canRedo}
-          >
-            <Redo2 size={17} />
-          </button>
-          <span className="tl-divider" />
           <button
             className={activeTool === "select" ? "is-active" : ""}
             title={`${t("timeline.selectTool")} · V`}
@@ -1238,29 +1301,47 @@ export default function Timeline(props: TimelineProps) {
           >
             <Scissors size={16} />
           </button>
+          <span className="tl-divider" />
+          <button
+            title={`${t("toolbar.undo")} · ⌘Z`}
+            aria-label={t("toolbar.undo")}
+            onClick={props.onUndo}
+            disabled={!props.canUndo}
+          >
+            <Undo2 size={16} />
+          </button>
+          <button
+            title={`${t("toolbar.redo")} · ⇧⌘Z`}
+            aria-label={t("toolbar.redo")}
+            onClick={props.onRedo}
+            disabled={!props.canRedo}
+          >
+            <Redo2 size={16} />
+          </button>
+          <span className="tl-divider" />
+          <button
+            title={`${t("toolbar.trimLeft")} · Q`}
+            aria-label={`${t("toolbar.trimLeft")} · Q`}
+            onClick={props.onTrimLeft ?? (() => trimLeftAtPlayhead())}
+            disabled={!canTrimAtPlayhead}
+          >
+            <TrimLeftIcon />
+          </button>
           <button
             title={`${t("toolbar.split")} · ⌘B`}
             aria-label={t("toolbar.split")}
             onClick={props.onSplit}
-            disabled={
-              !project.clips.some(
-                (c) =>
-                  !project.tracks.find((t) => t.id === c.trackId)?.locked &&
-                  (!selectedIds.length || selectedIds.includes(c.id)) &&
-                  c.start < playhead &&
-                  c.start + c.duration > playhead,
-              )
-            }
+            disabled={!canSplitAtPlayhead}
           >
-            <Scissors size={17} />
+            <SplitCenterIcon />
           </button>
           <button
-            title={t("shortcuts.duplicate")}
-            aria-label={t("shortcuts.duplicate")}
-            onClick={props.onDuplicate}
-            disabled={!selectedUnlocked || !props.onDuplicate}
+            title={`${t("toolbar.trimRight")} · W`}
+            aria-label={`${t("toolbar.trimRight")} · W`}
+            onClick={props.onTrimRight ?? (() => trimRightAtPlayhead())}
+            disabled={!canTrimAtPlayhead}
           >
-            <Copy size={16} />
+            <TrimRightIcon />
           </button>
           <button
             title={`${t("toolbar.delete")} · Backspace`}
@@ -1270,9 +1351,65 @@ export default function Timeline(props: TimelineProps) {
           >
             <Trash2 size={16} />
           </button>
-          <span className="tl-divider" />
+
+          {activeClip && (
+            <div className="tl-toolbar-contextual" data-testid="timeline-contextual-group">
+              <span className="tl-divider" />
+              <button
+                title={t("toolbar.freeze")}
+                aria-label={t("toolbar.freeze")}
+                onClick={props.onFreeze}
+                disabled={!isVideoClip || activeTrack?.locked || !props.onFreeze}
+              >
+                <Snowflake size={15} />
+              </button>
+              <button
+                title={t("toolbar.reverse")}
+                aria-label={t("toolbar.reverse")}
+                onClick={props.onReverse}
+                disabled={!isVideoClip || activeTrack?.locked || !props.onReverse}
+              >
+                <RotateCcw size={15} />
+              </button>
+              <button
+                title={t("toolbar.separateAudio")}
+                aria-label={t("toolbar.separateAudio")}
+                onClick={() => props.onSeparateAudio ? props.onSeparateAudio() : separateAudio(activeClip.id)}
+                disabled={!hasAudioSeparable || activeTrack?.locked}
+              >
+                <AudioLines size={15} />
+              </button>
+              <button
+                title={`${t("shortcuts.duplicate")} · ⌘D`}
+                aria-label={t("shortcuts.duplicate")}
+                onClick={props.onDuplicate ?? duplicate}
+                disabled={!selectedUnlocked}
+              >
+                <Copy size={15} />
+              </button>
+              <button
+                title={t("toolbar.crop")}
+                aria-label={t("toolbar.crop")}
+                onClick={props.onCrop}
+                disabled={!isVideoClip || !props.onCrop}
+              >
+                <Crop size={15} />
+              </button>
+              <button
+                title={t("toolbar.speed")}
+                aria-label={t("toolbar.speed")}
+                onClick={props.onSpeed}
+                disabled={!props.onSpeed}
+              >
+                <Gauge size={15} />
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="tl-toolbar-end">
           <button
-            className={magnetic ? "is-active" : ""}
+            className={magnetic ? "is-active tl-btn-active" : ""}
             title={
               magnetic
                 ? t("timeline.magneticDeleteOn")
@@ -1290,10 +1427,10 @@ export default function Timeline(props: TimelineProps) {
               }
             }}
           >
-            <Magnet size={17} />
+            <Magnet size={16} />
           </button>
           <button
-            className={snapping ? "is-active" : ""}
+            className={snapping ? "is-active tl-btn-active" : ""}
             title={snapping ? t("timeline.snappingOn") : t("timeline.snappingOff")}
             aria-label={t("toolbar.snapping")}
             aria-pressed={snapping}
@@ -1304,8 +1441,14 @@ export default function Timeline(props: TimelineProps) {
           >
             <span className="tl-snap-icon">][</span>
           </button>
-        </div>
-        <div className="tl-toolbar-end">
+          <button
+            className="is-active tl-btn-active"
+            title="Link Selection"
+            aria-label="Link Selection"
+          >
+            <Link2 size={16} />
+          </button>
+
           <span className="tl-duration">
             {formatTimelineTime(playhead, project.fps)} <i>/</i>{" "}
             {formatTimelineTime(
@@ -1357,6 +1500,7 @@ export default function Timeline(props: TimelineProps) {
               if (scrollRef.current) scrollRef.current.scrollLeft = 0;
             }}
           >
+            <Maximize2 size={13} style={{ marginRight: 4 }} />
             {t("timeline.fit")}
           </button>
         </div>

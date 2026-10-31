@@ -100,6 +100,8 @@ const dictionary = {
   "toolbar.undo": "撤销",
   "toolbar.redo": "重做",
   "toolbar.split": "分割片段",
+  "toolbar.crop": "裁剪",
+  "toolbar.speed": "变速",
   "toolbar.delete": "删除片段",
   "toolbar.snapping": "对齐吸附",
   "toolbar.magnetic": "磁性时间线",
