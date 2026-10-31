@@ -278,33 +278,70 @@ export default function CanvasTransformGizmo({
           </div>
         )}
 
-        {/* Rotation Stalk and Knob */}
+        {/* Top-Left Deselect / Close Handle */}
         <div
-          className="gizmo-rotate-stalk"
+          className="gizmo-close-handle"
+          data-testid="gizmo-deselect-btn"
           style={{
             position: "absolute",
-            top: -24,
-            left: "50%",
-            width: 1.5,
-            height: 24,
-            transform: "translateX(-50%)",
-            pointerEvents: "none",
+            top: -10,
+            left: -10,
+            width: 18,
+            height: 18,
+            borderRadius: "50%",
+            background: "#ffffff",
+            color: "#222222",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.5)",
+            cursor: "pointer",
+            zIndex: 10,
           }}
-        />
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            useEditorStore.getState().select([]);
+          }}
+          title="Deselect / Tutup seleksi"
+        >
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+            <line x1="2" y1="2" x2="10" y2="10" />
+            <line x1="10" y1="2" x2="2" y2="10" />
+          </svg>
+        </div>
+
+        {/* Bottom Circular Rotation Handle */}
         <div
-          className="gizmo-rotate-knob"
+          className="gizmo-rotate-handle-bottom"
+          data-testid="gizmo-rotate-handle"
           style={{
             position: "absolute",
-            top: -34,
+            bottom: -28,
             left: "50%",
             transform: "translateX(-50%)",
+            width: 22,
+            height: 22,
+            borderRadius: "50%",
+            background: "#ffffff",
+            color: "#1a1a1a",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            boxShadow: "0 2px 6px rgba(0,0,0,0.45)",
+            cursor: "grab",
+            zIndex: 10,
           }}
           onPointerDown={handlePointerDownRotate}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
           title="Drag: Putar sudut (Tahan Shift untuk snap kelipatan 15°)"
-        />
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 8A6 6 0 1 0 8 14" />
+            <polyline points="8 10 8 14 12 14" />
+          </svg>
+        </div>
 
         {/* 4 Corner Scale Handles */}
         <div

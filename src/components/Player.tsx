@@ -694,6 +694,28 @@ export default function Player(props: PlayerProps) {
         <div className="timecode">
           <strong>{formatTime(playhead, project.fps)}</strong>
           <span> / {formatTime(duration, project.fps)}</span>
+          <button
+            className={`player-safe-btn ${safeZoneMode !== "none" ? "is-active" : ""}`}
+            title={`Safe Margin: ${safeZoneMode === "none" ? "Off" : safeZoneMode}`}
+            aria-label="Toggle Safe Margin"
+            onClick={() => {
+              const modes: SafeZoneMode[] = ["none", "tiktok", "reels", "16:9"];
+              const nextIdx = (modes.indexOf(safeZoneMode) + 1) % modes.length;
+              setSafeZoneMode(modes[nextIdx]);
+            }}
+            style={{
+              marginLeft: 8,
+              background: "transparent",
+              border: 0,
+              color: safeZoneMode !== "none" ? "#00f0d0" : "#888888",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              verticalAlign: "middle",
+            }}
+          >
+            <Grid size={15} />
+          </button>
         </div>
         <div className="transport">
           <button
