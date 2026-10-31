@@ -101,3 +101,27 @@ export function StartExport(arg1, arg2) {
 export function WriteTextFile(arg1, arg2) {
   return window['go']['main']['App']['WriteTextFile'](arg1, arg2);
 }
+
+export function ListProjects() {
+  return window['go']['main']['App']['ListProjects']();
+}
+
+export function CreateProject(arg1) {
+  return window['go']['main']['App']['CreateProject'](arg1);
+}
+
+export function DuplicateProject(arg1) {
+  return window['go']['main']['App']['DuplicateProject'](arg1);
+}
+
+export function RenameProject(arg1, arg2) {
+  return window['go']['main']['App']['RenameProject'](arg1, arg2);
+}
+
+export function DeleteProject(arg1) {
+  return window['go']['main']['App']['DeleteProject'](arg1);
+}
+
+export function SaveProjectCover(arg1, arg2) {
+  return window['go']['main']['App']['SaveProjectCover'](arg1, arg2);
+}

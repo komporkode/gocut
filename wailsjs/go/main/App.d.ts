@@ -53,3 +53,15 @@ export function SetDirty(arg1:boolean):Promise<void>;
 export function StartExport(arg1:string,arg2:string):Promise<string>;
 
 export function WriteTextFile(arg1:string,arg2:string):Promise<string>;
+
+export function ListProjects():Promise<Array<any>>;
+
+export function CreateProject(arg1:string):Promise<any>;
+
+export function DuplicateProject(arg1:string):Promise<any>;
+
+export function RenameProject(arg1:string,arg2:string):Promise<any>;
+
+export function DeleteProject(arg1:string):Promise<void>;
+
+export function SaveProjectCover(arg1:string,arg2:string):Promise<string>;
