@@ -704,5 +704,91 @@ export function swapClips(
   };
 }
 
+/**
+ * Trim Left at playhead (CapCut / NLE "Q" shortcut):
+ * Trims off the portion of the clip prior to the playhead.
+ * If magnetic is enabled, ripples subsequent clips to close the gap.
+ */
+export function trimClipLeftAtPlayhead(
+  p: Project,
+  clipId: string,
+  playhead: number,
+  magnetic = false,
+): Project {
+  const clip = p.clips.find(c => c.id === clipId);
+  if (!clip || !Number.isFinite(playhead)) return p;
+  const at = snapToFrame(playhead, p.fps);
+  if (at <= clip.start + 1 / p.fps - 1e-9 || at >= clip.start + clip.duration - 1 / p.fps + 1e-9) {
+    return p;
+  }
 
+  const ids = new Set(linkedIds(p, [clipId]));
+  const delta = at - clip.start;
 
+  let updatedClips = p.clips.map(c => {
+    if (!ids.has(c.id)) return c;
+    const newDuration = Math.max(1 / p.fps, c.duration - delta);
+    const newSourceIn = c.sourceIn + delta * c.speed;
+    const newStart = magnetic ? c.start : at;
+    return {
+      ...c,
+      start: newStart,
+      duration: newDuration,
+      sourceIn: newSourceIn,
+    };
+  });
+
+  if (magnetic) {
+    // Shift all subsequent clips on target track(s) left by delta
+    const targetTrackIds = new Set(p.clips.filter(c => ids.has(c.id)).map(c => c.trackId));
+    updatedClips = updatedClips.map(c => {
+      if (ids.has(c.id) || !targetTrackIds.has(c.trackId) || c.start <= clip.start) {
+        return c;
+      }
+      return {
+        ...c,
+        start: Math.max(0, snapToFrame(c.start - delta, p.fps)),
+      };
+    });
+  }
+
+  return {
+    ...p,
+    clips: updatedClips.sort((a, b) => a.start - b.start),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Trim Right at playhead (CapCut / NLE "W" shortcut):
+ * Trims off the portion of the clip after the playhead.
+ */
+export function trimClipRightAtPlayhead(
+  p: Project,
+  clipId: string,
+  playhead: number,
+): Project {
+  const clip = p.clips.find(c => c.id === clipId);
+  if (!clip || !Number.isFinite(playhead)) return p;
+  const at = snapToFrame(playhead, p.fps);
+  if (at <= clip.start + 1 / p.fps - 1e-9 || at >= clip.start + clip.duration - 1 / p.fps + 1e-9) {
+    return p;
+  }
+
+  const ids = new Set(linkedIds(p, [clipId]));
+  const newDuration = at - clip.start;
+
+  const updatedClips = p.clips.map(c => {
+    if (!ids.has(c.id)) return c;
+    return {
+      ...c,
+      duration: Math.max(1 / p.fps, newDuration),
+    };
+  });
+
+  return {
+    ...p,
+    clips: updatedClips.sort((a, b) => a.start - b.start),
+    updatedAt: new Date().toISOString(),
+  };
+}
