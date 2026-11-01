@@ -19,6 +19,7 @@ export interface MediaAsset {
   previewUrl?: string;
   previewError?: string;
   color?: string;
+  folder?: string;
 }
 export interface Transform {
   x: number;
@@ -161,6 +162,7 @@ export interface ExportOptions {
   quality: "draft" | "standard" | "high";
   format: "mp4" | "mov";
   encoder?: "auto" | "gpu" | "cpu";
+  bitrate?: string;
 }
 export interface ExportProgress {
   jobId: string;
@@ -284,8 +286,35 @@ export interface EditorAPI {
   writeTextFile: (text: string, name: string) => Promise<string | null>;
   revealPath: (path: string) => Promise<void>;
   getPathForFile: (file: File) => string;
+  resolveFilePaths?: (files: File[]) => Promise<string[]>;
+  inspectCapcutPath?: (path: string) => Promise<CapcutImportSelection | null>;
   onNativeFileDrop?: (callback: (paths: string[]) => void) => () => void;
+  chooseMediaFolder?: () => Promise<string | null>;
+  importMediaFolder?: (path?: string) => Promise<MediaAsset[]>;
+  getStorageInfo?: () => Promise<StorageInfo>;
+  relocateStorage?: (newDrive: string) => Promise<StorageInfo>;
+  listWhisperModels?: () => Promise<WhisperModel[]>;
+  importWhisperModel?: () => Promise<string>;
 }
+
+export interface StorageInfo {
+  dataDir: string;
+  activeDrive: string;
+  isPortable: boolean;
+  projectsDir: string;
+  cacheDir: string;
+  modelsDir: string;
+}
+
+export interface WhisperModel {
+  id: string;
+  name: string;
+  filename: string;
+  sizeMB: number;
+  installed: boolean;
+  path?: string;
+}
+
 declare global {
   interface Window {
     editorAPI?: EditorAPI;

@@ -692,37 +692,17 @@ export default function Player(props: PlayerProps) {
       </div>
       <div className="player-controls">
         <div className="timecode">
-          <strong>{formatTime(playhead, project.fps)}</strong>
-          <span> / {formatTime(duration, project.fps)}</span>
-          <button
-            className={`player-safe-btn ${safeZoneMode !== "none" ? "is-active" : ""}`}
-            title={`Safe Margin: ${safeZoneMode === "none" ? "Off" : safeZoneMode}`}
-            aria-label="Toggle Safe Margin"
-            onClick={() => {
-              const modes: SafeZoneMode[] = ["none", "tiktok", "reels", "16:9"];
-              const nextIdx = (modes.indexOf(safeZoneMode) + 1) % modes.length;
-              setSafeZoneMode(modes[nextIdx]);
-            }}
-            style={{
-              marginLeft: 8,
-              background: "transparent",
-              border: 0,
-              color: safeZoneMode !== "none" ? "#00f0d0" : "#888888",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              verticalAlign: "middle",
-            }}
-          >
-            <Grid size={15} />
-          </button>
+          <strong className="timecode-current">{formatTime(playhead, project.fps)}</strong>
+          <span className="timecode-divider"> / </span>
+          <span className="timecode-total">{formatTime(duration, project.fps)}</span>
         </div>
         <div className="transport">
           <button
+            className="transport-btn"
             title={`${t("player.prevFrame")} ←`}
             onClick={() => onSeek(Math.max(0, playhead - 1 / project.fps))}
           >
-            <SkipBack size={15} />
+            <SkipBack size={12} />
           </button>
           <button
             className="play-button"
@@ -735,34 +715,23 @@ export default function Player(props: PlayerProps) {
             disabled={!duration}
           >
             {playing ? (
-              <Pause size={19} fill="currentColor" />
+              <Pause size={13} fill="currentColor" />
             ) : (
-              <Play size={19} fill="currentColor" />
+              <Play size={13} fill="currentColor" style={{ marginLeft: 1 }} />
             )}
           </button>
           <button
+            className="transport-btn"
             title={`${t("player.nextFrame")} →`}
             onClick={() =>
               onSeek(Math.min(duration, playhead + 1 / project.fps))
             }
           >
-            <SkipForward size={15} />
+            <SkipForward size={12} />
           </button>
         </div>
         <div className="player-tools">
-          <div className="player-safe-picker" title="Panduan Safe Zone (TikTok / Reels / 16:9)">
-            <select
-              value={safeZoneMode}
-              onChange={(e) => setSafeZoneMode(e.target.value as SafeZoneMode)}
-              aria-label="Safe Zone Guide"
-            >
-              <option value="none">Safe: Off</option>
-              <option value="tiktok">TikTok</option>
-              <option value="reels">Reels</option>
-              <option value="16:9">16:9 TV</option>
-            </select>
-          </div>
-          <div className="player-ratio-picker">
+          <div className="player-ratio-picker" title="Rasio Aspek Kanvas">
             <select
               aria-label="Aspect Ratio"
               value={
@@ -798,25 +767,40 @@ export default function Player(props: PlayerProps) {
             </select>
           </div>
           <button
+            className={`player-tool-btn ${safeZoneMode !== "none" ? "is-active" : ""}`}
+            title={`Panduan Safe Margin: ${safeZoneMode === "none" ? "Off" : safeZoneMode} (Klik untuk ganti)`}
+            aria-label="Toggle Safe Margin"
+            onClick={() => {
+              const modes: SafeZoneMode[] = ["none", "tiktok", "reels", "16:9"];
+              const nextIdx = (modes.indexOf(safeZoneMode) + 1) % modes.length;
+              setSafeZoneMode(modes[nextIdx]);
+            }}
+          >
+            <Grid size={12} />
+          </button>
+          <button
+            className="player-tool-btn"
             title={muted ? t("player.unmute") : t("player.mute")}
             onClick={() => setMuted(!muted)}
           >
-            {muted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+            {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
           </button>
           <button
+            className="player-tool-btn"
             title={t("player.zoom")}
             onClick={() => setViewScale(viewScale === 1 ? 1.5 : 1)}
           >
-            <ZoomIn size={16} />
+            <ZoomIn size={13} />
           </button>
           <button
+            className="player-tool-btn"
             title={t("player.fullscreen")}
             onClick={() => {
               if (document.fullscreenElement) void document.exitFullscreen();
               else void hostRef.current?.requestFullscreen();
             }}
           >
-            <Maximize size={16} />
+            <Maximize size={13} />
           </button>
         </div>
       </div>

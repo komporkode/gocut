@@ -416,7 +416,7 @@ export function formatTime(time: number, fps = 30) {
 /** Validate external project data without numeric coercion or defaulting missing fields. */
 export function validateProject(input: unknown): Project {
   const fail = (name: string): never => {
-    throw new Error(`项目 ${name} 无效`);
+    throw new Error(`Data proyek ${name} tidak valid (Invalid project ${name} / 项目 ${name} 无效)`);
   };
   const object = (value: unknown, name: string): Record<string, unknown> => {
     if (

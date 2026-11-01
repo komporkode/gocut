@@ -16,6 +16,7 @@ describe('Project Dashboard Bridge API', () => {
     const created = await editorAPI.createProject('My Test Video');
     expect(created.project.name).toBe('My Test Video');
     expect(created.path).toBeTruthy();
+    expect(created.path.endsWith('.gct')).toBe(true);
 
     // 2. List projects
     let list = await editorAPI.listProjects();

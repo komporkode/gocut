@@ -20,6 +20,7 @@ import (
 	"reacut/pkg/ffmpeg"
 	"reacut/pkg/media"
 	"reacut/pkg/project"
+	"reacut/pkg/whisper"
 
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -53,6 +54,7 @@ type MediaAsset struct {
 	Duration   float64 `json:"duration"`
 	HasAudio   bool    `json:"hasAudio"`
 	Missing    bool    `json:"missing"`
+	Folder     string  `json:"folder,omitempty"`
 }
 
 type TextFileResult struct {
@@ -81,6 +83,7 @@ type App struct {
 	storage      *project.StorageManager
 	runner       *ffmpeg.Runner
 	capcut       *capcut.DraftReader
+	whisperMgr   *whisper.Manager
 	dirty        bool
 }
 
@@ -91,6 +94,7 @@ func NewApp() *App {
 		storage:      sm,
 		runner:       ffmpeg.NewRunner(),
 		capcut:       capcut.NewDraftReader(),
+		whisperMgr:   whisper.NewManager(sm.GetModelsDir("whisper")),
 	}
 }
 
@@ -102,7 +106,7 @@ func (a *App) GetSystemInfo() SystemInfo {
 	ffmpegPath, ffmpegErr := a.runner.ResolveTool("ffmpeg")
 	ffprobePath, ffprobeErr := a.runner.ResolveTool("ffprobe")
 
-	version := "0.7.0-beta (GoCut/Wails/Go)"
+	version := "0.8.0-beta (GoCut/Wails/Go)"
 	var ffmpegVer string
 	if ffmpegErr == nil {
 		cmd := exec.Command(ffmpegPath, "-version")
@@ -134,9 +138,10 @@ func (a *App) ChooseMediaTool(toolName string) (string, error) {
 	if err != nil || chosen == "" {
 		return "", err
 	}
-	if toolName == "ffmpeg" {
+	switch toolName {
+	case "ffmpeg":
 		a.runner.SetCustomPaths(chosen, "")
-	} else if toolName == "ffprobe" {
+	case "ffprobe":
 		a.runner.SetCustomPaths("", chosen)
 	}
 	return chosen, nil
@@ -149,7 +154,7 @@ func (a *App) OpenProject(path string) (*ProjectOpenResult, error) {
 		target, err = runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
 			Title: "Open GoCut Project",
 			Filters: []runtime.FileFilter{
-				{DisplayName: "GoCut Project (*.gocut;*.reacut;*.json)", Pattern: "*.gocut;*.reacut;*.json"},
+				{DisplayName: "GoCut Project (*.gct;*.gocut;*.reacut;*.json)", Pattern: "*.gct;*.gocut;*.reacut;*.json"},
 			},
 		})
 		if err != nil || target == "" {
@@ -177,9 +182,9 @@ func (a *App) SaveProject(projectJson string, path string) (string, error) {
 		var err error
 		target, err = runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
 			Title:           "Save GoCut Project",
-			DefaultFilename: "project.gocut",
+			DefaultFilename: "project.gct",
 			Filters: []runtime.FileFilter{
-				{DisplayName: "GoCut Project (*.gocut;*.reacut)", Pattern: "*.gocut;*.reacut"},
+				{DisplayName: "GoCut Project (*.gct;*.gocut;*.reacut)", Pattern: "*.gct;*.gocut;*.reacut"},
 			},
 		})
 		if err != nil || target == "" {
@@ -232,6 +237,44 @@ func (a *App) SaveProjectCover(projectPath string, base64Data string) error {
 	return a.storage.SaveProjectCover(projectPath, base64Data)
 }
 
+func (a *App) GetStorageInfo() project.StorageInfo {
+	return a.storage.GetStorageInfo()
+}
+
+func (a *App) RelocateStorage(newDrive string) (project.StorageInfo, error) {
+	if err := a.storage.RelocateDataDir(newDrive); err != nil {
+		return a.storage.GetStorageInfo(), err
+	}
+	a.whisperMgr.SetModelsDir(a.storage.GetModelsDir("whisper"))
+	return a.storage.GetStorageInfo(), nil
+}
+
+func (a *App) ListWhisperModels() []whisper.WhisperModel {
+	return a.whisperMgr.ListModels()
+}
+
+func (a *App) ImportWhisperModel() (string, error) {
+	target, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Pilih File Model Whisper (.bin)",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "GGML Whisper Model (*.bin)", Pattern: "*.bin"},
+		},
+	})
+	if err != nil || target == "" {
+		return "", err
+	}
+	if err := a.whisperMgr.ImportModel(target); err != nil {
+		return "", err
+	}
+	return filepath.Base(target), nil
+}
+
+var supportedMediaExts = map[string]bool{
+	".mp4": true, ".mov": true, ".m4v": true, ".webm": true,
+	".png": true, ".jpg": true, ".jpeg": true, ".webp": true,
+	".mp3": true, ".wav": true, ".m4a": true, ".aac": true,
+}
+
 func (a *App) ChooseMediaFiles() ([]string, error) {
 	paths, err := runtime.OpenMultipleFilesDialog(a.ctx, runtime.OpenDialogOptions{
 		Title: "Import Media",
@@ -242,6 +285,108 @@ func (a *App) ChooseMediaFiles() ([]string, error) {
 	return paths, err
 }
 
+func (a *App) ChooseMediaFolder() (string, error) {
+	folder, err := runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Import Media Folder",
+	})
+	return folder, err
+}
+
+func (a *App) createAssetFromPath(clean string, folder string) MediaAsset {
+	name := filepath.Base(clean)
+	ext := strings.ToLower(filepath.Ext(clean))
+	isImage := ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp"
+	streamUrl := fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(clean))
+
+	if isImage {
+		return MediaAsset{
+			ID:       uuid.NewString(),
+			Name:     name,
+			Path:     clean,
+			Url:      streamUrl,
+			Kind:     "image",
+			Width:    1920,
+			Height:   1080,
+			Fps:      0,
+			Duration: 5,
+			HasAudio: false,
+			Folder:   folder,
+		}
+	}
+
+	probe, err := a.runner.Probe(clean)
+	if err != nil {
+		return MediaAsset{
+			ID:       uuid.NewString(),
+			Name:     name,
+			Path:     clean,
+			Url:      streamUrl,
+			Kind:     "video",
+			Width:    1920,
+			Height:   1080,
+			Fps:      30,
+			Duration: 10,
+			HasAudio: true,
+			Folder:   folder,
+		}
+	}
+
+	previewUrl := streamUrl
+	if probe.Kind == "video" {
+		if proxyPath, err := a.runner.EnsureProxy(clean, probe.Codec); err == nil && proxyPath != "" {
+			previewUrl = fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(proxyPath))
+		}
+	}
+
+	return MediaAsset{
+		ID:         uuid.NewString(),
+		Name:       name,
+		Path:       clean,
+		Url:        streamUrl,
+		PreviewUrl: previewUrl,
+		Kind:       probe.Kind,
+		Width:      probe.Width,
+		Height:     probe.Height,
+		Fps:        probe.Fps,
+		Duration:   probe.Duration,
+		HasAudio:   probe.HasAudio,
+		Folder:     folder,
+	}
+}
+
+func (a *App) ScanMediaFolder(folderPath string) ([]MediaAsset, error) {
+	cleanRoot := media.NormalizePath(folderPath)
+	info, err := os.Stat(cleanRoot)
+	if err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("invalid directory: %s", folderPath)
+	}
+
+	rootName := filepath.Base(cleanRoot)
+	var assets []MediaAsset
+
+	err = filepath.WalkDir(cleanRoot, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if !supportedMediaExts[ext] {
+			return nil
+		}
+
+		rel, relErr := filepath.Rel(cleanRoot, filepath.Dir(p))
+		folderGroup := rootName
+		if relErr == nil && rel != "." && rel != "" {
+			folderGroup = filepath.ToSlash(filepath.Join(rootName, rel))
+		}
+
+		asset := a.createAssetFromPath(p, folderGroup)
+		assets = append(assets, asset)
+		return nil
+	})
+
+	return assets, err
+}
+
 func (a *App) ImportMedia(paths []string) ([]MediaAsset, error) {
 	var assets []MediaAsset
 	for _, p := range paths {
@@ -249,68 +394,24 @@ func (a *App) ImportMedia(paths []string) ([]MediaAsset, error) {
 		if resolved, err := media.ResolvePath(clean); err == nil && resolved != "" {
 			clean = resolved
 		}
-		name := filepath.Base(clean)
-		ext := strings.ToLower(filepath.Ext(clean))
-
-		// Check if image
-		isImage := ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".webp"
-
-		streamUrl := fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(clean))
-
-		if isImage {
-			assets = append(assets, MediaAsset{
-				ID:       uuid.NewString(),
-				Name:     name,
-				Path:     clean,
-				Url:      streamUrl,
-				Kind:     "image",
-				Width:    1920,
-				Height:   1080,
-				Fps:      0,
-				Duration: 5,
-				HasAudio: false,
-			})
-			continue
-		}
-
-		probe, err := a.runner.Probe(clean)
+		info, err := os.Stat(clean)
 		if err != nil {
-			// Fallback placeholder
-			assets = append(assets, MediaAsset{
-				ID:       uuid.NewString(),
-				Name:     name,
-				Path:     clean,
-				Url:      streamUrl,
-				Kind:     "video",
-				Width:    1920,
-				Height:   1080,
-				Fps:      30,
-				Duration: 10,
-				HasAudio: true,
-			})
+			continue
+		}
+		if info.IsDir() {
+			folderAssets, err := a.ScanMediaFolder(clean)
+			if err == nil {
+				assets = append(assets, folderAssets...)
+			}
 			continue
 		}
 
-		previewUrl := streamUrl
-		if probe.Kind == "video" {
-			if proxyPath, err := a.runner.EnsureProxy(clean, probe.Codec); err == nil && proxyPath != "" {
-				previewUrl = fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(proxyPath))
-			}
+		ext := strings.ToLower(filepath.Ext(clean))
+		if !supportedMediaExts[ext] {
+			continue
 		}
-
-		assets = append(assets, MediaAsset{
-			ID:         uuid.NewString(),
-			Name:       name,
-			Path:       clean,
-			Url:        streamUrl,
-			PreviewUrl: previewUrl,
-			Kind:       probe.Kind,
-			Width:      probe.Width,
-			Height:     probe.Height,
-			Fps:        probe.Fps,
-			Duration:   probe.Duration,
-			HasAudio:   probe.HasAudio,
-		})
+		asset := a.createAssetFromPath(clean, "")
+		assets = append(assets, asset)
 	}
 	return assets, nil
 }
@@ -393,6 +494,22 @@ func (a *App) ChooseCapcutProject(mode string) (*capcut.DraftSelection, error) {
 	media.RegisterSearchDir(filepath.Dir(file))
 	media.RegisterSearchDir(filepath.Dir(filepath.Dir(file)))
 	return a.capcut.InspectDraft(file)
+}
+
+func (a *App) InspectCapcutPath(path string) (*capcut.DraftSelection, error) {
+	clean := media.NormalizePath(path)
+	info, err := os.Stat(clean)
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		media.RegisterSearchDir(clean)
+		media.RegisterSearchDir(filepath.Dir(clean))
+		return a.capcut.InspectDraft(clean)
+	}
+	media.RegisterSearchDir(filepath.Dir(clean))
+	media.RegisterSearchDir(filepath.Dir(filepath.Dir(clean)))
+	return a.capcut.InspectDraft(clean)
 }
 
 func (a *App) ReadCapcutDraft(token string, timelineId string) (*CapcutDraftResult, error) {
@@ -637,6 +754,8 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		Height     int     `json:"height"`
 		Fps        float64 `json:"fps"`
 		Encoder    string  `json:"encoder"`
+		Quality    string  `json:"quality"`
+		Bitrate    string  `json:"bitrate"`
 	}
 	_ = json.Unmarshal([]byte(optionsJson), &opts)
 
@@ -921,100 +1040,156 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 	var args []string
 	args = append(args, "-y")
 
-	bg := "black"
-	if proj.Background != "" && proj.Background != "transparent" {
-		bg = proj.Background
-		if strings.HasPrefix(bg, "#") {
-			bg = "0x" + bg[1:]
-		}
-	}
-	args = append(args, "-f", "lavfi", "-i", fmt.Sprintf("color=c=%s:s=%dx%d:r=%.2f:d=%.2f", bg, outWidth, outHeight, fps, dur))
-
 	var filterComplex []string
-	currentBase := "[0:v]"
+	var currentBase string
+	var audioStartIdx int
 
-	ratioX := float64(outWidth) / float64(proj.Width)
-	ratioY := float64(outHeight) / float64(proj.Height)
-
-	for i, vc := range visualClips {
-		inIdx := i + 1
-		durSec := vc.Duration * vc.Speed
-		if vc.Kind == "image" {
-			args = append(args, "-loop", "1", "-t", fmt.Sprintf("%.3f", vc.Duration), "-i", vc.Path)
-		} else {
-			args = append(args, "-ss", fmt.Sprintf("%.3f", vc.SourceIn), "-t", fmt.Sprintf("%.3f", durSec), "-i", vc.Path)
-		}
-
-		clipTag := fmt.Sprintf("v%d", inIdx)
-
-		// Calculate scaled clip width and height
-		clipW := int(float64(outWidth) * vc.Scale)
-		clipH := int(float64(outHeight) * vc.Scale)
-		if clipW%2 != 0 {
-			clipW++
-		}
-		if clipH%2 != 0 {
-			clipH++
-		}
-
-		// Calculate position overlay offset
-		posX := (outWidth-clipW)/2 + int(vc.X*ratioX)
-		posY := (outHeight-clipH)/2 + int(vc.Y*ratioY)
-
-		var clipFilters []string
-		clipFilters = append(clipFilters, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2", clipW, clipH))
-		clipFilters = append(clipFilters, fmt.Sprintf("pad=%d:%d:(ow-iw)/2:(oh-ih)/2", clipW, clipH))
-
-		// Color adjustments
-		if vc.Brightness != 0 || vc.Contrast != 1 || vc.Saturation != 1 {
-			clipFilters = append(clipFilters, fmt.Sprintf("eq=brightness=%.2f:contrast=%.2f:saturation=%.2f", vc.Brightness, vc.Contrast, vc.Saturation))
-		}
-
-		// Fade In / Out
-		if vc.FadeIn > 0 {
-			clipFilters = append(clipFilters, fmt.Sprintf("fade=t=in:st=0:d=%.3f:alpha=1", vc.FadeIn))
-		}
-		if vc.FadeOut > 0 {
-			st := vc.Duration - vc.FadeOut
-			if st < 0 {
-				st = 0
-			}
-			clipFilters = append(clipFilters, fmt.Sprintf("fade=t=out:st=%.3f:d=%.3f:alpha=1", st, vc.FadeOut))
-		}
-
-		// Rotation
-		if vc.Rotation != 0 {
-			clipFilters = append(clipFilters, fmt.Sprintf("rotate=%.4f*PI/180:fillcolor=none:ow='hypot(iw,ih)':oh='hypot(iw,ih)'", vc.Rotation))
-		}
-
-		clipFilters = append(clipFilters, "setsar=1", "format=rgba")
-		clipFilters = append(clipFilters, fmt.Sprintf("setpts=PTS-STARTPTS+%.3f/TB", vc.Start))
-
-		filterComplex = append(filterComplex, fmt.Sprintf("[%d:v]%s[%s]", inIdx, strings.Join(clipFilters, ","), clipTag))
-
-		xExpr := fmt.Sprintf("%d", posX)
-		yExpr := fmt.Sprintf("%d", posY)
-
-		for _, tr := range proj.Transitions {
-			if tr.ToClipID == vc.ID && tr.Duration > 0 {
-				tEnd := vc.Start + tr.Duration
-				switch tr.Type {
-				case "slide-left":
-					xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
-				case "slide-right":
-					xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
-				case "slide-up":
-					yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
-				case "slide-down":
-					yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
-				}
+	// Detect if project is a simple sequence of adjacent full-frame clips without complex visual transforms
+	isSimpleSequential := len(visualClips) > 0 && len(proj.Transitions) == 0
+	if isSimpleSequential {
+		var expectedStart float64 = 0.0
+		for _, vc := range visualClips {
+			if math.Abs(vc.Scale-1.0) > 0.001 || vc.X != 0 || vc.Y != 0 || vc.Rotation != 0 ||
+				vc.Brightness != 0 || vc.Contrast != 1 || vc.Saturation != 1 ||
+				vc.FadeIn != 0 || vc.FadeOut != 0 || vc.Speed != 1.0 {
+				isSimpleSequential = false
 				break
 			}
+			if math.Abs(vc.Start-expectedStart) > 0.05 {
+				isSimpleSequential = false
+				break
+			}
+			expectedStart = vc.Start + vc.Duration
+		}
+		// Visual clips must cover the entire export duration
+		if math.Abs(expectedStart-dur) > 0.1 {
+			isSimpleSequential = false
+		}
+	}
+
+	if isSimpleSequential {
+		for i, vc := range visualClips {
+			inIdx := i
+			durSec := vc.Duration * vc.Speed
+			if vc.Kind == "image" {
+				args = append(args, "-loop", "1", "-t", fmt.Sprintf("%.3f", vc.Duration), "-i", vc.Path)
+			} else {
+				args = append(args, "-ss", fmt.Sprintf("%.3f", vc.SourceIn), "-t", fmt.Sprintf("%.3f", durSec), "-i", vc.Path)
+			}
+
+			clipTag := fmt.Sprintf("v%d", inIdx)
+			filterComplex = append(filterComplex, fmt.Sprintf("[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=%.2f,format=yuv420p[%s]",
+				inIdx, outWidth, outHeight, outWidth, outHeight, fps, clipTag))
 		}
 
-		nextBase := fmt.Sprintf("[base%d]", inIdx)
-		filterComplex = append(filterComplex, fmt.Sprintf("%s[%s]overlay=x='%s':y='%s':enable='between(t,%.3f,%.3f)'%s", currentBase, clipTag, xExpr, yExpr, vc.Start, vc.Start+vc.Duration, nextBase))
-		currentBase = nextBase
+		if len(visualClips) > 1 {
+			var concatInputs []string
+			for i := range visualClips {
+				concatInputs = append(concatInputs, fmt.Sprintf("[v%d]", i))
+			}
+			filterComplex = append(filterComplex, fmt.Sprintf("%sconcat=n=%d:v=1:a=0[vconcat]", strings.Join(concatInputs, ""), len(visualClips)))
+			currentBase = "[vconcat]"
+		} else {
+			currentBase = "[v0]"
+		}
+
+		audioStartIdx = len(visualClips)
+	} else {
+		bg := "black"
+		if proj.Background != "" && proj.Background != "transparent" {
+			bg = proj.Background
+			if strings.HasPrefix(bg, "#") {
+				bg = "0x" + bg[1:]
+			}
+		}
+		args = append(args, "-f", "lavfi", "-i", fmt.Sprintf("color=c=%s:s=%dx%d:r=%.2f:d=%.2f", bg, outWidth, outHeight, fps, dur))
+
+		currentBase = "[0:v]"
+		ratioX := float64(outWidth) / float64(proj.Width)
+		ratioY := float64(outHeight) / float64(proj.Height)
+
+		for i, vc := range visualClips {
+			inIdx := i + 1
+			durSec := vc.Duration * vc.Speed
+			if vc.Kind == "image" {
+				args = append(args, "-loop", "1", "-t", fmt.Sprintf("%.3f", vc.Duration), "-i", vc.Path)
+			} else {
+				args = append(args, "-ss", fmt.Sprintf("%.3f", vc.SourceIn), "-t", fmt.Sprintf("%.3f", durSec), "-i", vc.Path)
+			}
+
+			clipTag := fmt.Sprintf("v%d", inIdx)
+
+			// Calculate scaled clip width and height
+			clipW := int(float64(outWidth) * vc.Scale)
+			clipH := int(float64(outHeight) * vc.Scale)
+			if clipW%2 != 0 {
+				clipW++
+			}
+			if clipH%2 != 0 {
+				clipH++
+			}
+
+			// Calculate position overlay offset
+			posX := (outWidth-clipW)/2 + int(vc.X*ratioX)
+			posY := (outHeight-clipH)/2 + int(vc.Y*ratioY)
+
+			var clipFilters []string
+			clipFilters = append(clipFilters, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2", clipW, clipH))
+			clipFilters = append(clipFilters, fmt.Sprintf("pad=%d:%d:(ow-iw)/2:(oh-ih)/2", clipW, clipH))
+
+			// Color adjustments
+			if vc.Brightness != 0 || vc.Contrast != 1 || vc.Saturation != 1 {
+				clipFilters = append(clipFilters, fmt.Sprintf("eq=brightness=%.2f:contrast=%.2f:saturation=%.2f", vc.Brightness, vc.Contrast, vc.Saturation))
+			}
+
+			// Fade In / Out
+			if vc.FadeIn > 0 {
+				clipFilters = append(clipFilters, fmt.Sprintf("fade=t=in:st=0:d=%.3f:alpha=1", vc.FadeIn))
+			}
+			if vc.FadeOut > 0 {
+				st := vc.Duration - vc.FadeOut
+				if st < 0 {
+					st = 0
+				}
+				clipFilters = append(clipFilters, fmt.Sprintf("fade=t=out:st=%.3f:d=%.3f:alpha=1", st, vc.FadeOut))
+			}
+
+			// Rotation
+			if vc.Rotation != 0 {
+				clipFilters = append(clipFilters, fmt.Sprintf("rotate=%.4f*PI/180:fillcolor=none:ow='hypot(iw,ih)':oh='hypot(iw,ih)'", vc.Rotation))
+			}
+
+			clipFilters = append(clipFilters, "setsar=1", "format=rgba")
+			clipFilters = append(clipFilters, fmt.Sprintf("setpts=PTS-STARTPTS+%.3f/TB", vc.Start))
+
+			filterComplex = append(filterComplex, fmt.Sprintf("[%d:v]%s[%s]", inIdx, strings.Join(clipFilters, ","), clipTag))
+
+			xExpr := fmt.Sprintf("%d", posX)
+			yExpr := fmt.Sprintf("%d", posY)
+
+			for _, tr := range proj.Transitions {
+				if tr.ToClipID == vc.ID && tr.Duration > 0 {
+					tEnd := vc.Start + tr.Duration
+					switch tr.Type {
+					case "slide-left":
+						xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
+					case "slide-right":
+						xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
+					case "slide-up":
+						yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
+					case "slide-down":
+						yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
+					}
+					break
+				}
+			}
+
+			nextBase := fmt.Sprintf("[base%d]", inIdx)
+			filterComplex = append(filterComplex, fmt.Sprintf("%s[%s]overlay=x='%s':y='%s':enable='between(t,%.3f,%.3f)'%s", currentBase, clipTag, xExpr, yExpr, vc.Start, vc.Start+vc.Duration, nextBase))
+			currentBase = nextBase
+		}
+
+		audioStartIdx = len(visualClips) + 1
 	}
 
 	// Render Text & Subtitle Clips via ASS subtitles filter if any exist
@@ -1032,7 +1207,6 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		}
 	}
 
-	audioStartIdx := len(visualClips) + 1
 	var audioTags []string
 
 	for j, ac := range audioClips {
@@ -1080,16 +1254,55 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		args = append(args, "-map", "[aout]", "-c:a", "aac", "-b:a", "192k")
 	}
 
-	// Hardware Acceleration Selection (h264_mf, h264_nvenc, h264_qsv vs libx264)
-	encoderArgs := []string{"-c:v", "libx264", "-preset", "medium", "-crf", "20"}
+	// Hardware Acceleration Selection (h264_nvenc, h264_qsv, h264_amf, h264_mf vs libx264)
+	encoderArgs := []string{"-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-threads", "0"}
+	switch opts.Quality {
+	case "draft":
+		encoderArgs = []string{"-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-threads", "0"}
+	case "high":
+		encoderArgs = []string{"-c:v", "libx264", "-preset", "faster", "-crf", "18", "-threads", "0"}
+	}
+
 	if opts.Encoder != "cpu" {
-		if a.testEncoder("h264_mf") {
-			encoderArgs = []string{"-c:v", "h264_mf"}
-		} else if a.testEncoder("h264_nvenc") {
-			encoderArgs = []string{"-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"}
+		if a.testEncoder("h264_nvenc") {
+			switch opts.Quality {
+			case "draft":
+				encoderArgs = []string{"-c:v", "h264_nvenc", "-preset", "p1", "-cq", "28"}
+			case "high":
+				encoderArgs = []string{"-c:v", "h264_nvenc", "-preset", "p6", "-cq", "19"}
+			default:
+				encoderArgs = []string{"-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"}
+			}
 		} else if a.testEncoder("h264_qsv") {
-			encoderArgs = []string{"-c:v", "h264_qsv", "-global_quality", "23"}
+			switch opts.Quality {
+			case "draft":
+				encoderArgs = []string{"-c:v", "h264_qsv", "-global_quality", "28"}
+			case "high":
+				encoderArgs = []string{"-c:v", "h264_qsv", "-global_quality", "19"}
+			default:
+				encoderArgs = []string{"-c:v", "h264_qsv", "-global_quality", "23"}
+			}
+		} else if a.testEncoder("h264_amf") {
+			switch opts.Quality {
+			case "draft":
+				encoderArgs = []string{"-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_p", "28", "-qp_i", "28"}
+			case "high":
+				encoderArgs = []string{"-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_p", "19", "-qp_i", "19"}
+			default:
+				encoderArgs = []string{"-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_p", "23", "-qp_i", "23"}
+			}
+		} else if a.testEncoder("h264_mf") {
+			encoderArgs = []string{"-c:v", "h264_mf"}
 		}
+	}
+
+	// Apply custom or preset bitrate if specified (e.g. "2M", "4M", "8M", "12M", "20M", "35M", "50M")
+	if opts.Bitrate != "" && opts.Bitrate != "auto" {
+		br := strings.TrimSpace(opts.Bitrate)
+		if !strings.HasSuffix(br, "M") && !strings.HasSuffix(br, "m") && !strings.HasSuffix(br, "k") && !strings.HasSuffix(br, "K") {
+			br = br + "M"
+		}
+		encoderArgs = append(encoderArgs, "-b:v", br, "-maxrate", br)
 	}
 
 	args = append(args, "-progress", "pipe:1")
@@ -1200,7 +1413,8 @@ func (a *App) GetStartupProject() (*ProjectOpenResult, error) {
 	// If CLI args provided a file path
 	if len(os.Args) > 1 {
 		arg := os.Args[1]
-		if strings.HasSuffix(strings.ToLower(arg), ".reacut") || strings.HasSuffix(strings.ToLower(arg), ".json") {
+		lowerArg := strings.ToLower(arg)
+		if strings.HasSuffix(lowerArg, ".gct") || strings.HasSuffix(lowerArg, ".gocut") || strings.HasSuffix(lowerArg, ".reacut") || strings.HasSuffix(lowerArg, ".json") {
 			return a.OpenProject(arg)
 		}
 	}
@@ -1220,14 +1434,7 @@ func (a *App) SaveMediaCache(name string, base64Data string) (string, error) {
 		return "", fmt.Errorf("failed to decode base64: %w", err)
 	}
 
-	appData := os.Getenv("APPDATA")
-	var cacheDir string
-	if appData != "" {
-		cacheDir = filepath.Join(appData, "reacut", "cache", "media")
-	} else {
-		home, _ := os.UserHomeDir()
-		cacheDir = filepath.Join(home, ".reacut", "cache", "media")
-	}
+	cacheDir := filepath.Join(a.storage.GetCacheDir(), "media")
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return "", err
 	}

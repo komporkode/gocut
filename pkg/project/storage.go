@@ -28,20 +28,111 @@ type ProjectEntry struct {
 	UpdatedAt string  `json:"updatedAt"`
 }
 
-type StorageManager struct {
-	configDir string
+type StorageInfo struct {
+	DataDir     string `json:"dataDir"`
+	ActiveDrive string `json:"activeDrive"`
+	IsPortable  bool   `json:"isPortable"`
+	ProjectsDir string `json:"projectsDir"`
+	CacheDir    string `json:"cacheDir"`
+	ModelsDir   string `json:"modelsDir"`
 }
 
-func NewStorageManager() (*StorageManager, error) {
+type StorageManager struct {
+	configDir  string
+	isPortable bool
+}
+
+func resolveDataDir() (string, bool) {
+	if execPath, err := os.Executable(); err == nil {
+		execDir := filepath.Dir(execPath)
+		if stat, err := os.Stat(filepath.Join(execDir, "data")); err == nil && stat.IsDir() {
+			return filepath.Join(execDir, "data"), true
+		}
+		if stat, err := os.Stat(filepath.Join(execDir, "..", "data")); err == nil && stat.IsDir() {
+			return filepath.Clean(filepath.Join(execDir, "..", "data")), true
+		}
+		cfgFile := filepath.Join(execDir, "config.json")
+		if data, err := os.ReadFile(cfgFile); err == nil {
+			var cfg struct {
+				DataDir string `json:"dataDir"`
+			}
+			if err := json.Unmarshal(data, &cfg); err == nil && cfg.DataDir != "" {
+				if stat, err := os.Stat(cfg.DataDir); err == nil && stat.IsDir() {
+					return cfg.DataDir, false
+				}
+			}
+		}
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		base = os.TempDir()
 	}
-	dir := filepath.Join(base, "ReaCut")
+	return filepath.Join(base, "ReaCut"), false
+}
+
+func NewStorageManager() (*StorageManager, error) {
+	dir, portable := resolveDataDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create app data directory: %w", err)
 	}
-	return &StorageManager{configDir: dir}, nil
+	mgr := &StorageManager{configDir: dir, isPortable: portable}
+	_ = os.MkdirAll(mgr.GetProjectsDir(), 0755)
+	_ = os.MkdirAll(mgr.GetCacheDir(), 0755)
+	_ = os.MkdirAll(mgr.GetModelsDir("whisper"), 0755)
+	return mgr, nil
+}
+
+func (s *StorageManager) GetDataDir() string {
+	return s.configDir
+}
+
+func (s *StorageManager) GetCacheDir() string {
+	dir := filepath.Join(s.configDir, "Cache")
+	_ = os.MkdirAll(dir, 0755)
+	return dir
+}
+
+func (s *StorageManager) GetModelsDir(sub string) string {
+	dir := filepath.Join(s.configDir, "Models", sub)
+	_ = os.MkdirAll(dir, 0755)
+	return dir
+}
+
+func (s *StorageManager) GetStorageInfo() StorageInfo {
+	drive := filepath.VolumeName(s.configDir)
+	if drive == "" && len(s.configDir) > 0 {
+		drive = string(s.configDir[0]) + ":"
+	}
+	return StorageInfo{
+		DataDir:     s.configDir,
+		ActiveDrive: drive,
+		IsPortable:  s.isPortable,
+		ProjectsDir: s.GetProjectsDir(),
+		CacheDir:    s.GetCacheDir(),
+		ModelsDir:   s.GetModelsDir("whisper"),
+	}
+}
+
+func (s *StorageManager) RelocateDataDir(newDriveRoot string) error {
+	cleanDrive := strings.TrimRight(newDriveRoot, "\\/")
+	targetData := filepath.Join(cleanDrive, "GoCut", "data")
+	if err := os.MkdirAll(targetData, 0755); err != nil {
+		return err
+	}
+	if execPath, err := os.Executable(); err == nil {
+		execDir := filepath.Dir(execPath)
+		cfgFile := filepath.Join(execDir, "config.json")
+		cfgData := map[string]string{"dataDir": targetData}
+		if bytes, err := json.MarshalIndent(cfgData, "", "  "); err == nil {
+			_ = os.WriteFile(cfgFile, bytes, 0644)
+		}
+	}
+	s.configDir = targetData
+	s.isPortable = false
+	_ = os.MkdirAll(s.GetProjectsDir(), 0755)
+	_ = os.MkdirAll(s.GetCacheDir(), 0755)
+	_ = os.MkdirAll(s.GetModelsDir("whisper"), 0755)
+	return nil
 }
 
 // SaveAtomic writes data to a temporary file first and renames it atomically
@@ -67,15 +158,20 @@ func (s *StorageManager) SaveAtomic(filePath string, data []byte) error {
 }
 
 func (s *StorageManager) Autosave(data []byte) error {
-	target := filepath.Join(s.configDir, "autosave.reacut")
+	target := filepath.Join(s.configDir, "autosave.gct")
 	return s.SaveAtomic(target, data)
 }
 
 func (s *StorageManager) ReadAutosave() (string, error) {
-	target := filepath.Join(s.configDir, "autosave.reacut")
+	target := filepath.Join(s.configDir, "autosave.gct")
 	content, err := os.ReadFile(target)
 	if err != nil {
 		if os.IsNotExist(err) {
+			// Fallback to legacy autosave.reacut if present
+			legacy := filepath.Join(s.configDir, "autosave.reacut")
+			if legContent, legErr := os.ReadFile(legacy); legErr == nil {
+				return string(legContent), nil
+			}
 			return "", nil
 		}
 		return "", err
@@ -141,48 +237,86 @@ func (s *StorageManager) ListProjects() ([]ProjectEntry, error) {
 	}
 	var results []ProjectEntry
 	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(strings.ToLower(entry.Name()), ".reacut") {
-			fullPath := filepath.Join(projectsDir, entry.Name())
-			info, err := entry.Info()
+		var fullPath, coverUri, baseName string
+		var info os.FileInfo
+		var duration float64
+
+		if entry.IsDir() {
+			projectFile := filepath.Join(projectsDir, entry.Name(), "project.gct")
+			fInfo, err := os.Stat(projectFile)
 			if err != nil {
 				continue
 			}
-			baseName := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-			coverFile := filepath.Join(projectsDir, baseName+".cover.jpg")
-			var coverUri string
+			fullPath = projectFile
+			info = fInfo
+			baseName = entry.Name()
+			coverFile := filepath.Join(projectsDir, entry.Name(), "cover.jpg")
 			if _, err := os.Stat(coverFile); err == nil {
 				coverUri = fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(coverFile))
 			}
-			var duration float64
-			if content, err := os.ReadFile(fullPath); err == nil {
-				var draft struct {
+		} else {
+			ext := strings.ToLower(filepath.Ext(entry.Name()))
+			if ext != ".gct" && ext != ".reacut" && ext != ".gocut" {
+				continue
+			}
+			fInfo, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			fullPath = filepath.Join(projectsDir, entry.Name())
+			info = fInfo
+			baseName = strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
+			coverFile := filepath.Join(projectsDir, baseName+".cover.jpg")
+			if _, err := os.Stat(coverFile); err == nil {
+				coverUri = fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(coverFile))
+			}
+		}
+
+		if content, err := os.ReadFile(fullPath); err == nil {
+			var draft struct {
+				Duration float64 `json:"duration"`
+				Assets   []struct {
+					Thumbnail string `json:"thumbnail"`
+					Path      string `json:"path"`
+					Kind      string `json:"kind"`
+				} `json:"assets"`
+				Clips []struct {
+					Start    float64 `json:"start"`
 					Duration float64 `json:"duration"`
-					Clips    []struct {
-						Start    float64 `json:"start"`
-						Duration float64 `json:"duration"`
-					} `json:"clips"`
+				} `json:"clips"`
+			}
+			if err := json.Unmarshal(content, &draft); err == nil {
+				duration = draft.Duration
+				if duration <= 0 {
+					for _, c := range draft.Clips {
+						if end := c.Start + c.Duration; end > duration {
+							duration = end
+						}
+					}
 				}
-				if err := json.Unmarshal(content, &draft); err == nil {
-					duration = draft.Duration
-					if duration <= 0 {
-						for _, c := range draft.Clips {
-							if end := c.Start + c.Duration; end > duration {
-								duration = end
-							}
+				if coverUri == "" {
+					for _, a := range draft.Assets {
+						if a.Thumbnail != "" {
+							coverUri = a.Thumbnail
+							break
+						} else if (a.Kind == "image" || a.Kind == "video") && a.Path != "" {
+							coverUri = fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(a.Path))
+							break
 						}
 					}
 				}
 			}
-			results = append(results, ProjectEntry{
-				ID:        baseName,
-				Name:      baseName,
-				Path:      fullPath,
-				Cover:     coverUri,
-				SizeBytes: info.Size(),
-				Duration:  duration,
-				UpdatedAt: info.ModTime().Format(time.RFC3339),
-			})
 		}
+
+		results = append(results, ProjectEntry{
+			ID:        baseName,
+			Name:      baseName,
+			Path:      fullPath,
+			Cover:     coverUri,
+			SizeBytes: info.Size(),
+			Duration:  duration,
+			UpdatedAt: info.ModTime().Format(time.RFC3339),
+		})
 	}
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].UpdatedAt > results[j].UpdatedAt
@@ -197,14 +331,18 @@ func (s *StorageManager) CreateProject(name string) (ProjectEntry, error) {
 	projectsDir := s.GetProjectsDir()
 	cleanName := strings.ReplaceAll(name, "/", "-")
 	cleanName = strings.ReplaceAll(cleanName, "\\", "-")
-	targetPath := filepath.Join(projectsDir, cleanName+".reacut")
 
-	if _, err := os.Stat(targetPath); err == nil {
+	projectFolder := filepath.Join(projectsDir, cleanName)
+	if _, err := os.Stat(projectFolder); err == nil {
 		cleanName = fmt.Sprintf("%s-%d", cleanName, time.Now().Unix())
-		targetPath = filepath.Join(projectsDir, cleanName+".reacut")
+		projectFolder = filepath.Join(projectsDir, cleanName)
 	}
 
-	initialProject := fmt.Sprintf(`{"id":"%s","name":%q,"width":1920,"height":1080,"fps":30,"background":"#000000","tracks":[{"id":"t-video-1","kind":"video","name":"Video 1"},{"id":"t-audio-1","kind":"audio","name":"Audio 1"}],"clips":[],"assets":[]}`, cleanName, name)
+	_ = os.MkdirAll(filepath.Join(projectFolder, "backups"), 0755)
+	targetPath := filepath.Join(projectFolder, "project.gct")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	initialProject := fmt.Sprintf(`{"version":1,"id":%q,"name":%q,"width":1920,"height":1080,"fps":30,"background":"#101015","createdAt":%q,"updatedAt":%q,"tracks":[{"id":"t-text-1","kind":"text","name":"Text","muted":false,"hidden":false,"locked":false},{"id":"t-video-1","kind":"video","name":"Video 1","muted":false,"hidden":false,"locked":false},{"id":"t-audio-1","kind":"audio","name":"Audio 1","muted":false,"hidden":false,"locked":false}],"clips":[],"assets":[]}`, cleanName, name, now, now)
 	if err := s.SaveAtomic(targetPath, []byte(initialProject)); err != nil {
 		return ProjectEntry{}, err
 	}
@@ -224,28 +362,52 @@ func (s *StorageManager) DuplicateProject(sourcePath string) (ProjectEntry, erro
 	if err != nil {
 		return ProjectEntry{}, err
 	}
-	base := filepath.Base(sourcePath)
-	ext := filepath.Ext(base)
-	baseName := strings.TrimSuffix(base, ext)
-	newName := baseName + " Copy"
-	projectsDir := filepath.Dir(sourcePath)
-	targetPath := filepath.Join(projectsDir, newName+ext)
-	if _, err := os.Stat(targetPath); err == nil {
-		newName = fmt.Sprintf("%s-%d", newName, time.Now().Unix())
-		targetPath = filepath.Join(projectsDir, newName+ext)
-	}
-	if err := s.SaveAtomic(targetPath, data); err != nil {
-		return ProjectEntry{}, err
+	isFolder := filepath.Base(sourcePath) == "project.gct"
+	var newPath string
+	var newName string
+
+	if isFolder {
+		sourceDir := filepath.Dir(sourcePath)
+		parentDir := filepath.Dir(sourceDir)
+		oldName := filepath.Base(sourceDir)
+		newName = oldName + " Copy"
+		targetDir := filepath.Join(parentDir, newName)
+		if _, err := os.Stat(targetDir); err == nil {
+			newName = fmt.Sprintf("%s-%d", newName, time.Now().Unix())
+			targetDir = filepath.Join(parentDir, newName)
+		}
+		_ = os.MkdirAll(filepath.Join(targetDir, "backups"), 0755)
+		newPath = filepath.Join(targetDir, "project.gct")
+		if err := s.SaveAtomic(newPath, data); err != nil {
+			return ProjectEntry{}, err
+		}
+		srcCover := filepath.Join(sourceDir, "cover.jpg")
+		if coverBytes, err := os.ReadFile(srcCover); err == nil {
+			_ = os.WriteFile(filepath.Join(targetDir, "cover.jpg"), coverBytes, 0644)
+		}
+	} else {
+		base := filepath.Base(sourcePath)
+		ext := filepath.Ext(base)
+		baseName := strings.TrimSuffix(base, ext)
+		newName = baseName + " Copy"
+		projectsDir := filepath.Dir(sourcePath)
+		newPath = filepath.Join(projectsDir, newName+ext)
+		if _, err := os.Stat(newPath); err == nil {
+			newName = fmt.Sprintf("%s-%d", newName, time.Now().Unix())
+			newPath = filepath.Join(projectsDir, newName+ext)
+		}
+		if err := s.SaveAtomic(newPath, data); err != nil {
+			return ProjectEntry{}, err
+		}
+		srcCover := filepath.Join(projectsDir, baseName+".cover.jpg")
+		dstCover := filepath.Join(projectsDir, newName+".cover.jpg")
+		if coverBytes, err := os.ReadFile(srcCover); err == nil {
+			_ = os.WriteFile(dstCover, coverBytes, 0644)
+		}
 	}
 
-	srcCover := filepath.Join(projectsDir, baseName+".cover.jpg")
-	dstCover := filepath.Join(projectsDir, newName+".cover.jpg")
-	if coverBytes, err := os.ReadFile(srcCover); err == nil {
-		_ = os.WriteFile(dstCover, coverBytes, 0644)
-	}
-
-	_ = s.AddRecent(newName, targetPath)
-	info, _ := os.Stat(targetPath)
+	_ = s.AddRecent(newName, newPath)
+	info, _ := os.Stat(newPath)
 	var size int64
 	if info != nil {
 		size = info.Size()
@@ -253,29 +415,46 @@ func (s *StorageManager) DuplicateProject(sourcePath string) (ProjectEntry, erro
 	return ProjectEntry{
 		ID:        newName,
 		Name:      newName,
-		Path:      targetPath,
+		Path:      newPath,
 		SizeBytes: size,
 		UpdatedAt: time.Now().Format(time.RFC3339),
 	}, nil
 }
 
 func (s *StorageManager) RenameProject(projectPath string, newName string) (ProjectEntry, error) {
-	dir := filepath.Dir(projectPath)
-	ext := filepath.Ext(projectPath)
-	oldBase := strings.TrimSuffix(filepath.Base(projectPath), ext)
 	cleanNew := strings.ReplaceAll(newName, "/", "-")
 	cleanNew = strings.ReplaceAll(cleanNew, "\\", "-")
-	newPath := filepath.Join(dir, cleanNew+ext)
-	if newPath != projectPath {
-		if err := os.Rename(projectPath, newPath); err != nil {
-			return ProjectEntry{}, err
+
+	isFolder := filepath.Base(projectPath) == "project.gct"
+	var newPath string
+
+	if isFolder {
+		sourceDir := filepath.Dir(projectPath)
+		parentDir := filepath.Dir(sourceDir)
+		targetDir := filepath.Join(parentDir, cleanNew)
+		if targetDir != sourceDir {
+			if err := os.Rename(sourceDir, targetDir); err != nil {
+				return ProjectEntry{}, err
+			}
 		}
-		oldCover := filepath.Join(dir, oldBase+".cover.jpg")
-		newCover := filepath.Join(dir, cleanNew+".cover.jpg")
-		if _, err := os.Stat(oldCover); err == nil {
-			_ = os.Rename(oldCover, newCover)
+		newPath = filepath.Join(targetDir, "project.gct")
+	} else {
+		dir := filepath.Dir(projectPath)
+		ext := filepath.Ext(projectPath)
+		oldBase := strings.TrimSuffix(filepath.Base(projectPath), ext)
+		newPath = filepath.Join(dir, cleanNew+ext)
+		if newPath != projectPath {
+			if err := os.Rename(projectPath, newPath); err != nil {
+				return ProjectEntry{}, err
+			}
+			oldCover := filepath.Join(dir, oldBase+".cover.jpg")
+			newCover := filepath.Join(dir, cleanNew+".cover.jpg")
+			if _, err := os.Stat(oldCover); err == nil {
+				_ = os.Rename(oldCover, newCover)
+			}
 		}
 	}
+
 	_ = s.AddRecent(newName, newPath)
 	info, _ := os.Stat(newPath)
 	var size int64
@@ -292,6 +471,9 @@ func (s *StorageManager) RenameProject(projectPath string, newName string) (Proj
 }
 
 func (s *StorageManager) DeleteProject(projectPath string) error {
+	if filepath.Base(projectPath) == "project.gct" {
+		return os.RemoveAll(filepath.Dir(projectPath))
+	}
 	_ = os.Remove(projectPath)
 	dir := filepath.Dir(projectPath)
 	base := strings.TrimSuffix(filepath.Base(projectPath), filepath.Ext(projectPath))
@@ -300,9 +482,14 @@ func (s *StorageManager) DeleteProject(projectPath string) error {
 }
 
 func (s *StorageManager) SaveProjectCover(projectPath string, base64Data string) error {
-	dir := filepath.Dir(projectPath)
-	base := strings.TrimSuffix(filepath.Base(projectPath), filepath.Ext(projectPath))
-	target := filepath.Join(dir, base+".cover.jpg")
+	var target string
+	if filepath.Base(projectPath) == "project.gct" {
+		target = filepath.Join(filepath.Dir(projectPath), "cover.jpg")
+	} else {
+		dir := filepath.Dir(projectPath)
+		base := strings.TrimSuffix(filepath.Base(projectPath), filepath.Ext(projectPath))
+		target = filepath.Join(dir, base+".cover.jpg")
+	}
 	idx := strings.Index(base64Data, ",")
 	raw := base64Data
 	if idx != -1 {

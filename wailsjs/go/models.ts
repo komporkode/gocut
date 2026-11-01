@@ -95,6 +95,7 @@ export namespace main {
 	    duration: number;
 	    hasAudio: boolean;
 	    missing: boolean;
+	    folder?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new MediaAsset(source);
@@ -115,6 +116,7 @@ export namespace main {
 	        this.duration = source["duration"];
 	        this.hasAudio = source["hasAudio"];
 	        this.missing = source["missing"];
+	        this.folder = source["folder"];
 	    }
 	}
 	export class ProjectOpenResult {
@@ -172,6 +174,30 @@ export namespace main {
 
 export namespace project {
 	
+	export class ProjectEntry {
+	    id: string;
+	    name: string;
+	    path: string;
+	    cover?: string;
+	    sizeBytes: number;
+	    duration: number;
+	    updatedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ProjectEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.path = source["path"];
+	        this.cover = source["cover"];
+	        this.sizeBytes = source["sizeBytes"];
+	        this.duration = source["duration"];
+	        this.updatedAt = source["updatedAt"];
+	    }
+	}
 	export class RecentEntry {
 	    name: string;
 	    path: string;
@@ -186,6 +212,55 @@ export namespace project {
 	        this.name = source["name"];
 	        this.path = source["path"];
 	        this.updatedAt = source["updatedAt"];
+	    }
+	}
+	export class StorageInfo {
+	    dataDir: string;
+	    activeDrive: string;
+	    isPortable: boolean;
+	    projectsDir: string;
+	    cacheDir: string;
+	    modelsDir: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StorageInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.dataDir = source["dataDir"];
+	        this.activeDrive = source["activeDrive"];
+	        this.isPortable = source["isPortable"];
+	        this.projectsDir = source["projectsDir"];
+	        this.cacheDir = source["cacheDir"];
+	        this.modelsDir = source["modelsDir"];
+	    }
+	}
+
+}
+
+export namespace whisper {
+	
+	export class WhisperModel {
+	    id: string;
+	    name: string;
+	    filename: string;
+	    sizeMB: number;
+	    installed: boolean;
+	    path?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WhisperModel(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.filename = source["filename"];
+	        this.sizeMB = source["sizeMB"];
+	        this.installed = source["installed"];
+	        this.path = source["path"];
 	    }
 	}
 

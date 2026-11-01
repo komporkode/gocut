@@ -41,6 +41,34 @@ export function formatProjectDuration(seconds: number): string {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
+export function formatRelativeDate(dateStr: string): string {
+  if (!dateStr) return "";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return "";
+    const now = new Date();
+    const isToday =
+      d.getDate() === now.getDate() &&
+      d.getMonth() === now.getMonth() &&
+      d.getFullYear() === now.getFullYear();
+    if (isToday) {
+      return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday =
+      d.getDate() === yesterday.getDate() &&
+      d.getMonth() === yesterday.getMonth() &&
+      d.getFullYear() === yesterday.getFullYear();
+    if (isYesterday) {
+      return "Kemarin";
+    }
+    return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+  } catch {
+    return "";
+  }
+}
+
 export function filterAndSortProjects(
   projects: ProjectInfo[],
   query: string,
@@ -59,22 +87,42 @@ export function filterAndSortProjects(
   );
 }
 
+export function GoCutLogoIcon({ size = 22, className = "" }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 326 350"
+      fill="currentColor"
+      className={className}
+    >
+      <path d="M177.51 224.9l74.87 0c-13.15,32.51 -45.02,55.45 -82.25,55.45 -48.98,0 -88.69,-39.71 -88.69,-88.69 0,-38.65 24.73,-71.53 59.23,-83.68l30.55 -88.18 -16.34 2.23c-3.73,0.51 -4.43,0.6 -7.65,1.03 -83.13,11.1 -147.23,79.12 -147.23,168.59 0,90.64 76.17,170.13 170.13,170.13 73.7,0 136.46,-46.87 160.09,-112.42 8.46,-23.45 17.45,-56.47 19.87,-80.88 0.54,-5.45 0.63,-13.7 -9.24,-13.7l-90.04 0 -45.95 0c-3.44,0 -7.36,2.81 -8.7,6.26l-22.47 57.59c-1.34,3.44 0.37,6.26 3.82,6.26z" />
+      <polygon points="222.85,96.27 253.29,8.38 196.11,16.2 165.66,104.09" />
+      <path d="M278.11 4.99l-30.45 87.89 77.68 -10.63c3.74,-0.51 6.38,-3.99 5.87,-7.73l-9.38 -68.58c-0.51,-3.74 -3.99,-6.38 -7.73,-5.87l-35.99 4.92z" />
+    </svg>
+  );
+}
+
 interface ProjectDashboardProps {
   onOpenProject: (path: string) => void;
   onNewProject: () => void;
   onOpenExternalFile?: () => void;
+  onDropFiles?: (files: File[], paths?: string[]) => void;
 }
 
 export default function ProjectDashboard({
   onOpenProject,
   onNewProject,
   onOpenExternalFile,
+  onDropFiles,
 }: ProjectDashboardProps) {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortMode, setSortMode] = useState<"recent" | "name">("recent");
   const [activeMenuPath, setActiveMenuPath] = useState<string | null>(null);
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+  const dragCounter = useRef(0);
 
   // Modals state
   const [renameTarget, setRenameTarget] = useState<ProjectInfo | null>(null);
@@ -154,15 +202,45 @@ export default function ProjectDashboard({
   };
 
   return (
-    <div className="project-dashboard">
+    <div
+      className={`project-dashboard ${isDraggingOver ? "is-drag-over" : ""}`}
+      onDragEnter={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        dragCounter.current++;
+        setIsDraggingOver(true);
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+      }}
+      onDragLeave={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        dragCounter.current = Math.max(0, dragCounter.current - 1);
+        if (dragCounter.current === 0) setIsDraggingOver(false);
+      }}
+      onDrop={async (e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounter.current = 0;
+        setIsDraggingOver(false);
+        const files = Array.from(e.dataTransfer.files);
+        const paths = window.editorAPI?.resolveFilePaths
+          ? await window.editorAPI.resolveFilePaths(files)
+          : window.editorAPI
+            ? files.map((file) => window.editorAPI!.getPathForFile(file)).filter(Boolean)
+            : [];
+        onDropFiles?.(files, paths);
+      }}
+    >
       <div className="dashboard-container">
         {/* Header */}
         <header className="dashboard-header">
           <div className="dashboard-logo">
-            <div className="dashboard-logo-icon">
-              <Film size={18} />
-            </div>
-            <span>GoCut</span>
+            <img src="./icons/gocut_title.png" alt="GoCut" className="dashboard-logo-img" />
           </div>
           <div className="dashboard-actions">
             <button
@@ -176,19 +254,26 @@ export default function ProjectDashboard({
           </div>
         </header>
 
-        {/* Hero Banner */}
+        {/* Compact Minimalist Hero Banner */}
         <section className="dashboard-hero">
           <div className="dashboard-hero-content">
-            <h1>{t("dashboard.heroTitle") || "Buat Video Hebat Anda"}</h1>
-            <p>
-              {t("dashboard.heroSubtitle") ||
-                "Editor video desktop offline yang cepat, ringan, dan canggih dengan alur kerja modern ala CapCut."}
-            </p>
+            <h1>{t("dashboard.heroTitle") || "Selamat Datang di GoCut"}</h1>
           </div>
-          <button className="dashboard-hero-btn" onClick={handleCreateNew}>
-            <Plus size={20} />
-            <span>{t("toolbar.newProject")}</span>
-          </button>
+          <div className="dashboard-hero-actions">
+            <button className="dashboard-hero-btn" onClick={handleCreateNew}>
+              <Plus size={18} />
+              <span>{t("toolbar.newProject")}</span>
+            </button>
+            <button
+              className="secondary-action-btn"
+              style={{ height: 40 }}
+              onClick={onOpenExternalFile}
+              title={t("toolbar.openProject")}
+            >
+              <FolderOpen size={16} />
+              <span>{t("toolbar.openProject")}</span>
+            </button>
+          </div>
         </section>
 
         {/* Projects Section */}
@@ -245,80 +330,94 @@ export default function ProjectDashboard({
                       {p.cover ? (
                         <img src={p.cover} alt={p.name} />
                       ) : (
-                        <div className="project-thumbnail-placeholder">
-                          <Video size={36} />
+                        <div className="project-thumbnail-neon">
+                          <div className="neon-logo-box">
+                            <GoCutLogoIcon size={24} />
+                          </div>
                         </div>
                       )}
-
-                      <button
-                        className={`project-card-menu-btn ${isMenuOpen ? "active" : ""}`}
-                        title="Opsi Proyek"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setActiveMenuPath(isMenuOpen ? null : p.path);
-                        }}
-                      >
-                        <MoreVertical size={16} />
-                      </button>
-
-                      {isMenuOpen && (
-                        <div
-                          ref={menuRef}
-                          className="card-context-menu"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            className="context-menu-item"
-                            onClick={() => {
-                              setActiveMenuPath(null);
-                              onOpenProject(p.path);
-                            }}
-                          >
-                            <Play size={14} />
-                            <span>{t("common.open") || "Buka"}</span>
-                          </button>
-                          <button
-                            className="context-menu-item"
-                            onClick={() => {
-                              setActiveMenuPath(null);
-                              setRenameTarget(p);
-                              setRenameValue(p.name);
-                            }}
-                          >
-                            <Pencil size={14} />
-                            <span>{t("common.rename") || "Ganti Nama"}</span>
-                          </button>
-                          <button
-                            className="context-menu-item"
-                            onClick={() => handleDuplicate(p.path)}
-                          >
-                            <Copy size={14} />
-                            <span>{t("shortcuts.duplicate") || "Duplikat"}</span>
-                          </button>
-                          <button
-                            className="context-menu-item danger"
-                            onClick={() => {
-                              setActiveMenuPath(null);
-                              setDeleteTarget(p);
-                            }}
-                          >
-                            <Trash2 size={14} />
-                            <span>{t("toolbar.delete") || "Hapus"}</span>
-                          </button>
-                        </div>
-                      )}
+                      <div className="project-duration-badge">
+                        {formatProjectDuration(p.duration)}
+                      </div>
                     </div>
+
+                    {/* Top-Right Context Menu Trigger Button */}
+                    <button
+                      className={`project-card-menu-btn ${isMenuOpen ? "active" : ""}`}
+                      title="Opsi Proyek"
+                      aria-label={`Opsi untuk ${p.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveMenuPath(isMenuOpen ? null : p.path);
+                      }}
+                    >
+                      <MoreVertical size={16} />
+                    </button>
 
                     <div className="project-info">
-                      <div className="project-title" title={p.name}>
-                        {p.name}
+                      <div className="project-header-row">
+                        <div className="project-card-title" title={p.name}>
+                          {p.name}
+                        </div>
                       </div>
-                      <div className="project-meta">
+                      <div className="project-meta-row">
                         <span>{formatBytes(p.sizeBytes)}</span>
-                        <span>•</span>
-                        <span>{formatProjectDuration(p.duration)}</span>
+                        {p.updatedAt && (
+                          <>
+                            <span>•</span>
+                            <span>{formatRelativeDate(p.updatedAt)}</span>
+                          </>
+                        )}
                       </div>
                     </div>
+
+                    {isMenuOpen && (
+                      <div
+                        ref={menuRef}
+                        className="card-context-menu"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          className="context-menu-item"
+                          onClick={() => {
+                            setActiveMenuPath(null);
+                            onOpenProject(p.path);
+                          }}
+                        >
+                          <Play size={14} />
+                          <span>{t("common.open") || "Buka"}</span>
+                        </button>
+                        <button
+                          className="context-menu-item"
+                          onClick={() => {
+                            setActiveMenuPath(null);
+                            setRenameTarget(p);
+                            setRenameValue(p.name);
+                          }}
+                        >
+                          <Pencil size={14} />
+                          <span>{t("common.rename") || "Ganti Nama"}</span>
+                        </button>
+                        <button
+                          className="context-menu-item"
+                          onClick={() => handleDuplicate(p.path)}
+                        >
+                          <Copy size={14} />
+                          <span>{t("dashboard.duplicateProject") || "Duplikat Proyek"}</span>
+                        </button>
+                        <div className="context-menu-divider" />
+                        <button
+                          className="context-menu-item danger"
+                          onClick={() => {
+                            setActiveMenuPath(null);
+                            setDeleteTarget(p);
+                          }}
+                        >
+                          <Trash2 size={14} />
+                          <span>{t("toolbar.delete") || "Hapus"}</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

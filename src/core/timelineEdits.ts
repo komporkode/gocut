@@ -792,3 +792,102 @@ export function trimClipRightAtPlayhead(
     updatedAt: new Date().toISOString(),
   };
 }
+
+/**
+ * Natural alphanumeric sort for assets (e.g., clip_1, clip_2, clip_10).
+ */
+export function sortAssetsNaturally(assets: MediaAsset[]): MediaAsset[] {
+  return [...assets].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+  );
+}
+
+/**
+ * Sequentially inserts media assets into the timeline:
+ * - Visual assets (video, image) land on video track (first unlocked video track).
+ * - Audio assets land on audio track (first unlocked audio track).
+ * - mode === 'append' places them at the end of each track.
+ * - mode === 'ripple' places them at targetTime and pushes existing downstream clips to the right.
+ */
+export function insertSequentialAssets(
+  p: Project,
+  assets: MediaAsset[],
+  targetTime: number = 0,
+  mode: 'ripple' | 'append' = 'append',
+): Project {
+  if (!assets.length) return p;
+  const sorted = sortAssetsNaturally(assets);
+  const visualAssets = sorted.filter(a => a.kind === 'video' || a.kind === 'image');
+  const audioAssets = sorted.filter(a => a.kind === 'audio');
+
+  let updatedTracks = [...p.tracks];
+  let videoTrack = updatedTracks.find(t => t.kind === 'video' && !t.locked);
+  if (!videoTrack && visualAssets.length > 0) {
+    videoTrack = createTrack('video', `Video ${updatedTracks.filter(t => t.kind === 'video').length + 1}`);
+    updatedTracks.push(videoTrack);
+  }
+
+  let audioTrack = updatedTracks.find(t => t.kind === 'audio' && !t.locked);
+  if (!audioTrack && audioAssets.length > 0) {
+    audioTrack = createTrack('audio', `Audio ${updatedTracks.filter(t => t.kind === 'audio').length + 1}`);
+    updatedTracks.push(audioTrack);
+  }
+
+  const fps = p.fps || 30;
+  const snap = (t: number) => snapToFrame(Math.max(0, t), fps);
+
+  const newClips: Clip[] = [];
+  let updatedClips = [...p.clips];
+
+  const processTrackGroup = (track: Track, groupAssets: MediaAsset[]) => {
+    if (!groupAssets.length) return;
+
+    const durations = groupAssets.map(a =>
+      a.kind === 'image' ? 5 : Math.max(1 / fps, a.duration || 5)
+    );
+    const totalGroupDuration = durations.reduce((sum, d) => sum + d, 0);
+
+    let startOffset: number;
+    if (mode === 'append') {
+      const existingTrackClips = updatedClips.filter(c => c.trackId === track.id);
+      startOffset = existingTrackClips.reduce((max, c) => Math.max(max, c.start + c.duration), 0);
+    } else {
+      startOffset = snap(targetTime);
+      updatedClips = updatedClips.map(c => {
+        if (c.trackId !== track.id) return c;
+        if (c.start >= startOffset - 1e-9) {
+          return { ...c, start: snap(c.start + totalGroupDuration) };
+        }
+        return c;
+      });
+    }
+
+    let cursor = startOffset;
+    for (let i = 0; i < groupAssets.length; i++) {
+      const asset = groupAssets[i];
+      const dur = durations[i];
+      const clip = createClip(asset, track.id, cursor, fps);
+      clip.duration = dur;
+      newClips.push(clip);
+      cursor = snap(cursor + dur);
+    }
+  };
+
+  if (videoTrack && visualAssets.length) {
+    processTrackGroup(videoTrack, visualAssets);
+  }
+  if (audioTrack && audioAssets.length) {
+    processTrackGroup(audioTrack, audioAssets);
+  }
+
+  const existingAssetIds = new Set(p.assets.map(a => a.id));
+  const newAssetsToAdd = assets.filter(a => !existingAssetIds.has(a.id));
+
+  return {
+    ...p,
+    tracks: updatedTracks,
+    assets: [...p.assets, ...newAssetsToAdd],
+    clips: [...updatedClips, ...newClips].sort((a, b) => a.start - b.start),
+    updatedAt: new Date().toISOString(),
+  };
+}

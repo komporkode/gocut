@@ -3,6 +3,7 @@
 import {capcut} from '../models';
 import {project} from '../models';
 import {main} from '../models';
+import {whisper} from '../models';
 
 export function AutosaveProject(arg1:string):Promise<void>;
 
@@ -16,11 +17,19 @@ export function ChooseExportPath(arg1:string,arg2:string):Promise<string>;
 
 export function ChooseMediaFiles():Promise<Array<string>>;
 
+export function ChooseMediaFolder():Promise<string>;
+
 export function ChooseMediaTool(arg1:string):Promise<string>;
 
 export function CloseWindow():Promise<void>;
 
+export function CreateProject(arg1:string):Promise<project.ProjectEntry>;
+
+export function DeleteProject(arg1:string):Promise<void>;
+
 export function DiscardCapcutProject(arg1:string):Promise<void>;
+
+export function DuplicateProject(arg1:string):Promise<project.ProjectEntry>;
 
 export function GetAutosave():Promise<string>;
 
@@ -30,9 +39,19 @@ export function GetRecentProjects():Promise<Array<project.RecentEntry>>;
 
 export function GetStartupProject():Promise<main.ProjectOpenResult>;
 
+export function GetStorageInfo():Promise<project.StorageInfo>;
+
 export function GetSystemInfo():Promise<main.SystemInfo>;
 
 export function ImportMedia(arg1:Array<string>):Promise<Array<main.MediaAsset>>;
+
+export function ImportWhisperModel():Promise<string>;
+
+export function InspectCapcutPath(arg1:string):Promise<capcut.DraftSelection>;
+
+export function ListProjects():Promise<Array<project.ProjectEntry>>;
+
+export function ListWhisperModels():Promise<Array<whisper.WhisperModel>>;
 
 export function OpenProject(arg1:string):Promise<main.ProjectOpenResult>;
 
@@ -42,26 +61,22 @@ export function ReadTextFile(arg1:Array<string>):Promise<main.TextFileResult>;
 
 export function RelinkAsset(arg1:string):Promise<main.MediaAsset>;
 
+export function RelocateStorage(arg1:string):Promise<project.StorageInfo>;
+
+export function RenameProject(arg1:string,arg2:string):Promise<project.ProjectEntry>;
+
 export function RevealPath(arg1:string):Promise<void>;
 
 export function SaveMediaCache(arg1:string,arg2:string):Promise<string>;
 
 export function SaveProject(arg1:string,arg2:string):Promise<string>;
 
+export function SaveProjectCover(arg1:string,arg2:string):Promise<void>;
+
+export function ScanMediaFolder(arg1:string):Promise<Array<main.MediaAsset>>;
+
 export function SetDirty(arg1:boolean):Promise<void>;
 
 export function StartExport(arg1:string,arg2:string):Promise<string>;
 
 export function WriteTextFile(arg1:string,arg2:string):Promise<string>;
-
-export function ListProjects():Promise<Array<any>>;
-
-export function CreateProject(arg1:string):Promise<any>;
-
-export function DuplicateProject(arg1:string):Promise<any>;
-
-export function RenameProject(arg1:string,arg2:string):Promise<any>;
-
-export function DeleteProject(arg1:string):Promise<void>;
-
-export function SaveProjectCover(arg1:string,arg2:string):Promise<string>;

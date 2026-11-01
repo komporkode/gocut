@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.7.0-blue?style=flat-square" alt="Version: v0.7.0-beta" />
+  <img src="https://img.shields.io/badge/version-v0.8.0-blue?style=flat-square" alt="Version: v0.8.0-beta" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-45d6c0?style=flat-square" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/backend-Go_1.23+_·_Wails_v2-00ADD8?style=flat-square" alt="Backend: Go & Wails" />
   <img src="https://img.shields.io/badge/frontend-React_19_·_TypeScript_·_Vite-61DAFB?style=flat-square" alt="Frontend: React & Vite" />
@@ -43,12 +43,15 @@ GoCut is an independently enhanced fork of [**ReaCut**](https://github.com/Xiang
 
 While upstream ReaCut provided a solid prototype on macOS using Electron, GoCut completely overhauls the engine and expands the editing capabilities:
 
-| Aspect | Original ReaCut | GoCut (v0.7.0-beta) |
+| Aspect | Original ReaCut | GoCut (v0.8.0-beta) |
 |---|---|---|
 | **Runtime Architecture** | Electron (Chromium + Node.js multi-process) | **Go 1.23+ and Wails v2** (native OS Webview, ultra-lightweight) |
 | **Memory & Performance** | Heavy memory footprint; high idle resource usage | **Low RAM overhead**, instant cold boot, native Go subprocess execution |
 | **Platform Priority** | macOS Apple Silicon first; known Windows issues | **First-class cross-platform** (Windows, macOS, Linux) with hidden process management |
 | **Media Streaming** | File-based loading; prone to timeline scrubbing stutters | **Native HTTP 206 Partial Content byte-range streaming** with instant seek |
+| **Storage & Data Layout** | Fixed in `%APPDATA%` or `~/Library`; C: drive bloat | **Custom Drive Storage (`D:\GoCut\data\`)** + 1-click drive relocation & zero-config portable mode |
+| **Speech-to-Text (ASR)** | macOS MLX-only prototype | **Native C++ Whisper AI (`whisper.cpp`)** with tiny/base/small models and custom `.bin` importer |
+| **Windows Installer** | No official Windows installer | **Dual Installers**: Full Offline Setup (Inno Setup) + Standalone Web Downloader (< 6 MB) |
 | **Apple iPhone / MOV** | Limited support; orientation tag mismatch | **Automatic QuickTime rotation tag transpose (90°/180°/270°)** + on-demand H.264 proxy cache |
 | **Timeline Editing Tools** | Basic select and split | **Razor Tool (`C`)**, **Selection Tool (`V`)**, **Ripple Trim (`Q`/`W`)**, and interactive **Context Menus** |
 | **Snapping & Alignment** | Basic clip snapping | **Two-way magnetic snapping** (edges & playhead) with dynamic yellow guide line |
@@ -121,6 +124,20 @@ Beyond the developer sanity check, here is why Go was the deliberate architectur
   - Bahasa Indonesia (`id`)
   - 简体中文 (`zh-CN`)
   - Türkçe (`tr`)
+
+### 8. Custom Drive Storage & Portable Mode
+- Dedicated folder hierarchy: `<Drive>:\GoCut\data\` containing `projects/`, `cache/`, `models/whisper/`, and `templates/`.
+- Prevents C: drive bloating from large video proxies, AI models, and draft caches.
+- Automatic zero-config portable mode when running from `app/` alongside `data/`.
+- In-app 1-click drive relocation tool in Settings.
+
+### 9. Local Whisper AI Engine (Speech-to-Text)
+- Native C++ engine support (`whisper.cpp`) for fast, offline speech-to-text and automatic subtitle generation.
+- Model manager supporting standard models (`tiny` ~75 MB, `base` ~145 MB, `small` ~480 MB) and custom `.bin` model import.
+
+### 10. Dual Windows Installers
+- **Full Offline Installer (`GoCut-Setup-x64.exe`)**: Built with Inno Setup, featuring 1-click drive selection (`D:\GoCut`, `E:\GoCut`, etc.) and optional background Whisper model download.
+- **Standalone Web Downloader (`GoCut-WebSetup.exe`)**: Lightweight installer (< 6 MB) written in Go that fetches the latest release and models directly from GitHub.
 
 ---
 

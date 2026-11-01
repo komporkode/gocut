@@ -90,6 +90,7 @@ const GUTTER = 170;
 const ROW = 70;
 const RULER = 30;
 export const ASSET_DRAG_TYPE = "application/x-reacut-asset";
+export const FOLDER_DRAG_TYPE = "application/x-gocut-folder";
 export function formatTimelineTime(seconds: number, fps = 30) {
   const frames = Math.max(0, Math.round(seconds * fps));
   const secs = Math.floor(frames / fps);
@@ -403,6 +404,19 @@ export default function Timeline(props: TimelineProps) {
     window.addEventListener("keydown", handleKeyDown, true);
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [selectedTransition, storeSelectedTransitionId, selectTransition]);
+
+  const trackMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!trackMenu) return;
+    const handleOutsideClick = (e: PointerEvent) => {
+      if (trackMenuRef.current && !trackMenuRef.current.contains(e.target as Node)) {
+        setTrackMenu(false);
+      }
+    };
+    window.addEventListener("pointerdown", handleOutsideClick);
+    return () => window.removeEventListener("pointerdown", handleOutsideClick);
+  }, [trackMenu]);
 
   const setActiveGesture = (g: Gesture | null) => {
     if (g && g.kind !== "marquee" && !frozenLayoutsRef.current)
@@ -1063,6 +1077,22 @@ export default function Timeline(props: TimelineProps) {
   const onDrop = (event: React.DragEvent, track: Track) => {
     event.preventDefault();
     setDropTarget(null);
+    const isFolderDrag =
+      event.dataTransfer.types.includes(FOLDER_DRAG_TYPE) ||
+      event.dataTransfer.types.includes("application/x-gocut-folder");
+    if (isFolderDrag) {
+      const folderPath =
+        event.dataTransfer.getData(FOLDER_DRAG_TYPE) ||
+        event.dataTransfer.getData("application/x-gocut-folder");
+      if (folderPath) {
+        const dropTime = snapToFrame(
+          Math.max(0, locate(event.clientX, event.clientY).x / pps),
+          project.fps,
+        );
+        useEditorStore.getState().addFolderToTimeline(folderPath, "ripple", dropTime);
+        return;
+      }
+    }
     const isTextDrag =
       event.dataTransfer.types.includes("application/x-gocut-text") ||
       event.dataTransfer.types.includes("application/x-reacut-text");
@@ -1214,6 +1244,22 @@ export default function Timeline(props: TimelineProps) {
   const onDropNewTrack = (event: React.DragEvent) => {
     event.preventDefault();
     setDropTarget(null);
+    const isFolderDrag =
+      event.dataTransfer.types.includes(FOLDER_DRAG_TYPE) ||
+      event.dataTransfer.types.includes("application/x-gocut-folder");
+    if (isFolderDrag) {
+      const folderPath =
+        event.dataTransfer.getData(FOLDER_DRAG_TYPE) ||
+        event.dataTransfer.getData("application/x-gocut-folder");
+      if (folderPath) {
+        const dropTime = snapToFrame(
+          Math.max(0, locate(event.clientX, event.clientY).x / pps),
+          project.fps,
+        );
+        useEditorStore.getState().addFolderToTimeline(folderPath, "ripple", dropTime);
+        return;
+      }
+    }
     const id =
       event.dataTransfer.getData(ASSET_DRAG_TYPE) ||
       event.dataTransfer.getData("assetid");
@@ -1631,6 +1677,18 @@ export default function Timeline(props: TimelineProps) {
               className={`tl-new-track-dropzone ${dropTarget?.trackId === "new-video-track" || (gesture?.kind === "move" && gesture.targetTrackId === "new-overlay-track") ? "is-active" : ""}`}
             onDragOver={(event) => {
               if (event.dataTransfer.types.includes("application/x-reacut-transition") || event.dataTransfer.types.includes("application/x-gocut-transition")) return;
+              if (
+                event.dataTransfer.types.includes(FOLDER_DRAG_TYPE) ||
+                event.dataTransfer.types.includes("application/x-gocut-folder")
+              ) {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "copy";
+                setDropTarget({
+                  trackId: "new-video-track",
+                  time: Math.max(0, locate(event.clientX, event.clientY).x / pps),
+                });
+                return;
+              }
               const id =
                 event.dataTransfer.types.includes(ASSET_DRAG_TYPE) ||
                 event.dataTransfer.types.includes("assetid");
@@ -1854,6 +1912,18 @@ export default function Timeline(props: TimelineProps) {
                       event.preventDefault();
                       event.dataTransfer.dropEffect = "copy";
                     }
+                    return;
+                  }
+                  if (
+                    event.dataTransfer.types.includes(FOLDER_DRAG_TYPE) ||
+                    event.dataTransfer.types.includes("application/x-gocut-folder")
+                  ) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "copy";
+                    setDropTarget({
+                      trackId: track.id,
+                      time: Math.max(0, locate(event.clientX, event.clientY).x / pps),
+                    });
                     return;
                   }
                   const id =
@@ -2528,7 +2598,7 @@ export default function Timeline(props: TimelineProps) {
             </div>
           ))}
           <div className="tl-track-add">
-            <div className="tl-track-add-menu">
+            <div className="tl-track-add-menu" ref={trackMenuRef}>
               <button
                 onClick={() => setTrackMenu(!trackMenu)}
                 aria-expanded={trackMenu}

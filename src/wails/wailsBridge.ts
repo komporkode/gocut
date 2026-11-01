@@ -48,7 +48,28 @@ export function toMediaStreamUrl(filePathOrUrl: string): string {
 }
 
 export function normalizeProjectAssets(project: Project): Project {
-  if (!project || !Array.isArray(project.assets)) return project;
+  if (!project || typeof project !== "object") return project;
+  if (!project.version) project.version = 1;
+  const now = new Date().toISOString();
+  if (!project.createdAt) project.createdAt = now;
+  if (!project.updatedAt) project.updatedAt = now;
+  if (!project.background) project.background = "#101015";
+  if (!Array.isArray(project.assets)) project.assets = [];
+  if (!Array.isArray(project.tracks)) {
+    project.tracks = [
+      { id: "t-text-1", kind: "text", name: "Text", muted: false, hidden: false, locked: false },
+      { id: "t-video-1", kind: "video", name: "Video 1", muted: false, hidden: false, locked: false },
+      { id: "t-audio-1", kind: "audio", name: "Audio 1", muted: false, hidden: false, locked: false },
+    ];
+  } else {
+    for (const track of project.tracks) {
+      if (track.muted === undefined) track.muted = false;
+      if (track.hidden === undefined) track.hidden = false;
+      if (track.locked === undefined) track.locked = false;
+    }
+  }
+  if (!Array.isArray(project.clips)) project.clips = [];
+
   for (const asset of project.assets) {
     if (asset.path) {
       asset.url = toMediaStreamUrl(asset.path);
@@ -114,7 +135,86 @@ export function createWailsBridge(): EditorAPI {
         fps: a.fps,
         hasAudio: a.hasAudio,
         missing: a.missing || false,
+        folder: a.folder || undefined,
       }));
+    },
+
+    chooseMediaFolder: async (): Promise<string | null> => {
+      if (isWailsEnvironment()) {
+        try {
+          const folder = await App.ChooseMediaFolder();
+          return folder || null;
+        } catch {
+          return null;
+        }
+      }
+      return "/mock/Folder";
+    },
+
+    importMediaFolder: async (path?: string): Promise<MediaAsset[]> => {
+      let folderPath = path;
+      if (!folderPath && isWailsEnvironment()) {
+        folderPath = (await App.ChooseMediaFolder()) || undefined;
+      }
+      if (!folderPath) {
+        if (!isWailsEnvironment()) {
+          folderPath = "/mock/SampleFolder";
+        } else {
+          return [];
+        }
+      }
+
+      if (isWailsEnvironment()) {
+        try {
+          const res = await App.ScanMediaFolder(folderPath);
+          return (res || []).map((a) => ({
+            id: a.id,
+            name: a.name,
+            path: a.path,
+            url: toMediaStreamUrl(a.path),
+            kind: a.kind as MediaKind,
+            duration: a.duration,
+            width: a.width,
+            height: a.height,
+            fps: a.fps,
+            hasAudio: a.hasAudio,
+            missing: a.missing || false,
+            folder: a.folder || undefined,
+          }));
+        } catch {
+          return [];
+        }
+      }
+
+      const baseName = folderPath.split("/").pop() || "Folder";
+      return [
+        {
+          id: `mock-folder-1-${Date.now()}`,
+          name: "clip_1.mp4",
+          path: `${folderPath}/clip_1.mp4`,
+          url: "data:video/mp4;base64,mock",
+          kind: "video",
+          duration: 5,
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          hasAudio: true,
+          folder: baseName,
+        },
+        {
+          id: `mock-folder-2-${Date.now()}`,
+          name: "clip_2.mp4",
+          path: `${folderPath}/clip_2.mp4`,
+          url: "data:video/mp4;base64,mock",
+          kind: "video",
+          duration: 4,
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          hasAudio: true,
+          folder: baseName,
+        },
+      ];
     },
 
     relinkAsset: async (asset: MediaAsset): Promise<MediaAsset | null> => {
@@ -242,7 +342,7 @@ export function createWailsBridge(): EditorAPI {
 
     createProject: async (name: string) => {
       const p = createCoreProject(name);
-      const safePath = `/projects/${name.replace(/[^\w-]/g, "_")}-${Date.now()}.reacut`;
+      const safePath = `/projects/${name.replace(/[^\w-]/g, "_")}-${Date.now()}.gct`;
       const info: ProjectInfo = {
         id: p.id,
         name: p.name,
@@ -265,7 +365,7 @@ export function createWailsBridge(): EditorAPI {
     duplicateProject: async (path: string): Promise<ProjectInfo> => {
       const orig = mockProjects.find(p => p.path === path);
       const newName = orig ? `${orig.name} Copy` : "Duplicated Project Copy";
-      const newPath = `/projects/${newName.replace(/[^\w-]/g, "_")}-${Date.now()}.reacut`;
+      const newPath = `/projects/${newName.replace(/[^\w-]/g, "_")}-${Date.now()}.gct`;
       const duplicated: ProjectInfo = {
         id: `dup-${Date.now()}`,
         name: newName,
@@ -455,10 +555,54 @@ export function createWailsBridge(): EditorAPI {
       if (p && (p.includes("/") || p.includes("\\") || /^[a-zA-Z]:/.test(p))) {
         return p;
       }
-      if (file.name) {
-        return file.name;
-      }
       return "";
+    },
+
+    resolveFilePaths: async (files: File[]): Promise<string[]> => {
+      const direct = files.map((f) => {
+        const p = (f as unknown as { path?: string }).path;
+        return p && (p.includes("/") || p.includes("\\") || /^[a-zA-Z]:/.test(p)) ? p : "";
+      });
+      if (direct.length > 0 && direct.every(Boolean)) {
+        return direct;
+      }
+      try {
+        if (Runtime.CanResolveFilePaths()) {
+          const res = await (Runtime.ResolveFilePaths as unknown as (files: File[]) => Promise<string[]>)(files);
+          if (Array.isArray(res) && res.length > 0 && res.every(Boolean)) {
+            return res;
+          }
+        }
+      } catch {
+        // CanResolveFilePaths not supported or failed
+      }
+      return direct.filter(Boolean);
+    },
+
+    inspectCapcutPath: async (
+      path: string,
+    ): Promise<CapcutImportSelection | null> => {
+      try {
+        const fn = (App as any).InspectCapcutPath || (window as any).go?.main?.App?.InspectCapcutPath;
+        if (!fn) return null;
+        const res = await fn(path);
+        if (!res || !res.token) return null;
+        return {
+          token: res.token,
+          name: res.name,
+          requiresTimelineChoice: res.requiresTimelineChoice,
+          recommendedTimelineId: res.recommendedTimelineId,
+          timelines: (res.timelines || []).map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            isMain: t.isMain,
+            isActive: t.isActive,
+          })),
+          warnings: res.warnings || [],
+        };
+      } catch {
+        return null;
+      }
     },
 
     onNativeFileDrop: (callback: (paths: string[]) => void) => {
@@ -475,6 +619,37 @@ export function createWailsBridge(): EditorAPI {
       return Runtime.EventsOn("wails:file-drop", (_x: number, _y: number, paths: string[]) => {
         if (paths && paths.length) callback(paths);
       });
+    },
+
+    getStorageInfo: async () => {
+      try {
+        return await App.GetStorageInfo();
+      } catch {
+        return {
+          dataDir: "",
+          activeDrive: "C:",
+          isPortable: false,
+          projectsDir: "",
+          cacheDir: "",
+          modelsDir: "",
+        };
+      }
+    },
+
+    relocateStorage: async (drive: string) => {
+      return await App.RelocateStorage(drive);
+    },
+
+    listWhisperModels: async () => {
+      try {
+        return (await App.ListWhisperModels()) || [];
+      } catch {
+        return [];
+      }
+    },
+
+    importWhisperModel: async () => {
+      return await App.ImportWhisperModel();
     },
   };
 }

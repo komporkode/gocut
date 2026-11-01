@@ -15,7 +15,7 @@ import {
   snapToFrame,
   validateProject,
 } from "../core/model";
-import { linkedIds, moveLinked, speedLinked, slipLinked, placeAsset, trimLinked, splitLinked, unlinkClips, rippleTrim, closeGap, setClipSpeed, createCompoundClip, ungroupCompoundClip, rippleSnapTrack, rippleSnapAllTracks, reorderClip, swapClips, separateAudio, recoverAudio, trimClipLeftAtPlayhead, trimClipRightAtPlayhead, type PlacementMode } from "../core/timelineEdits";
+import { linkedIds, moveLinked, speedLinked, slipLinked, placeAsset, trimLinked, splitLinked, unlinkClips, rippleTrim, closeGap, setClipSpeed, createCompoundClip, ungroupCompoundClip, rippleSnapTrack, rippleSnapAllTracks, reorderClip, swapClips, separateAudio, recoverAudio, trimClipLeftAtPlayhead, trimClipRightAtPlayhead, insertSequentialAssets, type PlacementMode } from "../core/timelineEdits";
 import { applyTransition, removeTransition, type TransitionId } from "../core/creativePresets";
 import { addTransition as addTransitionEdit, resizeTransition as resizeTransitionEdit, removeTransition as removeTransitionRecordEdit, applyTransitionToAll as applyTransitionToAllEdit } from "../core/transitionEdits";
 import type { TransitionType } from "../core/types";
@@ -53,6 +53,12 @@ interface EditorState {
   addAssets: (assets: MediaAsset[]) => void;
   updateAsset: (assetId: string, patch: Partial<MediaAsset>) => void;
   removeAsset: (assetId: string) => void;
+  createFolder: (folderName: string) => void;
+  renameFolder: (oldFolder: string, newFolder: string) => void;
+  deleteFolder: (folderPath: string) => void;
+  moveAssetToFolder: (assetId: string, folder?: string) => void;
+  addAssetsToTimeline: (assetIds: string[], mode?: "ripple" | "append", atTime?: number) => void;
+  addFolderToTimeline: (folderPath: string, mode?: "ripple" | "append", atTime?: number) => void;
   addAssetClip: (assetId: string, start?: number, trackId?: string, range?: { sourceIn: number; duration: number }) => void;
   placeAsset: (assetId: string, trackId: string | undefined, range: { sourceIn: number; duration: number }, mode: PlacementMode) => void;
   unlinkSelected: () => void;
@@ -212,7 +218,8 @@ export function isProjectEqual(a: Project, b: Project): boolean {
       asA.name !== asB.name ||
       asA.kind !== asB.kind ||
       asA.duration !== asB.duration ||
-      asA.missing !== asB.missing
+      asA.missing !== asB.missing ||
+      asA.folder !== asB.folder
     ) return false;
   }
   for (let i = 0; i < a.clips.length; i++) {
@@ -437,16 +444,30 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   updateProject: (patch) => get().commit({ ...get().project, ...clone(patch) }),
   addAssets: (assets) => {
-    const p = get().project,
-      paths = new Set(p.assets.map((a) => a.path)),
+    const p = get().project;
+    const norm = (s?: string) => (s ? s.replace(/\\/g, "/").toLowerCase() : "");
+    const paths = new Set(p.assets.map((a) => norm(a.path))),
       ids = new Set(p.assets.map((a) => a.id));
+    let folderUpdated = false;
+    const currentAssets = p.assets.map((a) => {
+      const aNorm = norm(a.path);
+      const incoming = assets.find((inc) => (aNorm && norm(inc.path) === aNorm) || inc.id === a.id);
+      if (incoming && incoming.folder && incoming.folder !== a.folder) {
+        folderUpdated = true;
+        return { ...a, folder: incoming.folder };
+      }
+      return a;
+    });
     const fresh = assets.filter((a) => {
-      if (paths.has(a.path) || ids.has(a.id)) return false;
-      paths.add(a.path);
+      const aNorm = norm(a.path);
+      if ((aNorm && paths.has(aNorm)) || ids.has(a.id)) return false;
+      if (aNorm) paths.add(aNorm);
       ids.add(a.id);
       return true;
     });
-    if (fresh.length) get().commit({ ...p, assets: [...p.assets, ...fresh] });
+    if (fresh.length || folderUpdated) {
+      get().commit({ ...p, assets: [...currentAssets, ...fresh] });
+    }
   },
   updateAsset: (assetId, patch) => {
     const p = get().project;
@@ -458,6 +479,58 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (p.clips.some((c) => c.assetId === assetId))
       throw new Error("Asset is still in use by timeline clips. Please delete them first. (素材仍被时间线使用，请先删除对应片段)");
     get().commit({ ...p, assets: p.assets.filter((a) => a.id !== assetId) });
+  },
+  createFolder: () => {
+    /* folder is defined dynamically by asset metadata */
+  },
+  renameFolder: (oldFolder, newFolder) => {
+    const p = get().project;
+    const updated = p.assets.map((a) => {
+      if (a.folder === oldFolder) {
+        return { ...a, folder: newFolder };
+      }
+      if (a.folder && a.folder.startsWith(oldFolder + "/")) {
+        return { ...a, folder: newFolder + a.folder.slice(oldFolder.length) };
+      }
+      return a;
+    });
+    get().commit({ ...p, assets: updated });
+  },
+  deleteFolder: (folderPath) => {
+    const p = get().project;
+    const updated = p.assets.map((a) => {
+      if (a.folder === folderPath || (a.folder && a.folder.startsWith(folderPath + "/"))) {
+        return { ...a, folder: undefined };
+      }
+      return a;
+    });
+    get().commit({ ...p, assets: updated });
+  },
+  moveAssetToFolder: (assetId, folder) => {
+    const p = get().project;
+    const updated = p.assets.map((a) =>
+      a.id === assetId ? { ...a, folder: folder || undefined } : a
+    );
+    get().commit({ ...p, assets: updated });
+  },
+  addAssetsToTimeline: (assetIds, mode = "append", atTime) => {
+    const s = get();
+    const assetMap = new Map(s.project.assets.map((a) => [a.id, a]));
+    const selectedAssets = assetIds
+      .map((id) => assetMap.get(id))
+      .filter((a): a is MediaAsset => Boolean(a));
+    if (!selectedAssets.length) return;
+    const targetTime = atTime !== undefined ? atTime : (mode === "ripple" ? s.playhead : 0);
+    const updatedProject = insertSequentialAssets(s.project, selectedAssets, targetTime, mode);
+    s.commit(updatedProject);
+  },
+  addFolderToTimeline: (folderPath, mode = "append", atTime) => {
+    const s = get();
+    const folderAssets = s.project.assets.filter(
+      (a) => a.folder === folderPath || (a.folder && a.folder.startsWith(folderPath + "/"))
+    );
+    if (!folderAssets.length) return;
+    s.addAssetsToTimeline(folderAssets.map((a) => a.id), mode, atTime);
   },
   addAssetClip: (assetId, start, trackId, range) => {
     let p = get().project;

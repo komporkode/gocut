@@ -1,5 +1,21 @@
 # Catatan Rilis & Perubahan (Changelog)
 
+## 0.8.0 — 2026-11-01 (Penyimpanan Drive Mandiri, Whisper AI Lokal & Dual Installer)
+
+- **Penyimpanan Drive Mandiri & Mode Portabel (Custom Drive Storage)**:
+  - Dukungan struktur folder mandiri `<Drive>:\GoCut\data\` (`projects/`, `cache/`, `models/whisper/`, `templates/`), mencegah pembengkakan ruang drive sistem C:.
+  - Deteksi portabel otomatis jika aplikasi berjalan dari folder instalasi (`../data`), tanpa menyentuh registry Windows atau `%APPDATA%`.
+  - Kartu pengaturan baru "Penyimpanan & Drive Data" di menu Pengaturan dengan opsi pindah drive data 1-klik (`RelocateStorage`).
+- **Engine Whisper AI Lokal (Speech-to-Text Offline)**:
+  - Pengelola model Whisper native C++ (`WhisperManager` di `pkg/whisper/`) dengan dukungan model `tiny` (~75 MB), `base` (~145 MB), dan `small` (~480 MB).
+  - Integrasi UI Pengaturan untuk pemantauan status model dan tombol impor file model GGML `.bin` kustom secara offline.
+- **Dual Installer untuk Windows**:
+  - **Full Offline Installer (`GoCut-Setup-x64.exe`)**: Dibuat via Inno Setup 6, dilengkapi halaman pemilihan drive instalasi 1-klik (`C:`, `D:`, `E:`) dan opsi unduh model Whisper otomatis di latar belakang.
+  - **Web Downloader Ringan (`GoCut-WebSetup.exe`)**: Aplikasi instalasi ultra-ringan (< 6 MB) berbasis Go yang dapat mengunduh paket rilis terbaru dan model AI secara instan.
+- **Perbaikan Pemulihan Proyek & Lokalisasi Error**:
+  - Mengatasi galat bahasa Mandarin saat pemulihan proyek gagal (`项目 版本 无效`) dengan memastikan inisialisasi schema v1 lengkap (`version: 1`, `createdAt`, `updatedAt`, `track flags`) pada `pkg/project/storage.go`.
+  - Normalisasi otomatis untuk proyek lama dan fallback pesan error berbahasa Indonesia yang jelas.
+
 ## 0.7.0 — 2026-10-26 (Creative Suite, Compound Sub-Timeline & Audio Separation)
 
 - **Pemisahan & Pemulihan Audio (Separate & Recover Audio)**:

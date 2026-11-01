@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -14,7 +15,10 @@ import (
 
 func TestUserProjectExport(t *testing.T) {
 	appData := os.Getenv("APPDATA")
-	autosavePath := filepath.Join(appData, "reacut", "autosave.reacut")
+	autosavePath := filepath.Join(appData, "reacut", "autosave.gct")
+	if _, err := os.Stat(autosavePath); os.IsNotExist(err) {
+		autosavePath = filepath.Join(appData, "reacut", "autosave.reacut")
+	}
 	content, err := os.ReadFile(autosavePath)
 	if err != nil {
 		t.Skipf("Autosave file not found: %v", err)
@@ -202,5 +206,76 @@ func TestUserProjectExport(t *testing.T) {
 			t.Fatalf("Expected -filter_complex in args, got: %v", args)
 		}
 		t.Logf("Generated filter_complex: %s", filterStr)
+	})
+
+	// Test 6: Simple sequential footage export uses fast concat filter and fast encoder
+	t.Run("SequentialFootageFastConcat", func(t *testing.T) {
+		seqProj := `{
+			"name": "Sequential Test",
+			"width": 1920,
+			"height": 1080,
+			"fps": 30,
+			"background": "#000000",
+			"assets": [
+				{"id":"a1","name":"v.mp4","path":"` + filepath.ToSlash(dummyPng) + `","kind":"image","duration":10,"width":1920,"height":1080,"fps":30,"hasAudio":false}
+			],
+			"tracks": [
+				{"id":"v1","name":"Video 1","kind":"video","muted":false,"hidden":false}
+			],
+			"clips": [
+				{"id":"c1","trackId":"v1","assetId":"a1","name":"c1","start":0,"duration":5,"sourceIn":0,"speed":1,"volume":1,"muted":false,"fadeIn":0,"fadeOut":0},
+				{"id":"c2","trackId":"v1","assetId":"a1","name":"c2","start":5,"duration":5,"sourceIn":0,"speed":1,"volume":1,"muted":false,"fadeIn":0,"fadeOut":0}
+			]
+		}`
+		tempDir := t.TempDir()
+		outputFile := filepath.Join(tempDir, "test_seq.mp4")
+		optionsJson := `{"path":"` + filepath.ToSlash(outputFile) + `","format":"mp4","width":1920,"height":1080,"fps":30,"duration":10,"quality":"standard"}`
+
+		_, _, args, err := app.BuildExportArgs(seqProj, optionsJson)
+		if err != nil {
+			t.Fatalf("BuildExportArgs sequential failed: %v", err)
+		}
+
+		filterStr := ""
+		presetStr := ""
+		for idx, arg := range args {
+			if arg == "-filter_complex" && idx+1 < len(args) {
+				filterStr = args[idx+1]
+			}
+			if arg == "-preset" && idx+1 < len(args) {
+				presetStr = args[idx+1]
+			}
+		}
+
+		if !strings.Contains(filterStr, "concat=n=2") {
+			t.Errorf("Expected filter_complex to use concat=n=2, got: %s", filterStr)
+		}
+		if !strings.Contains(filterStr, "format=yuv420p") {
+			t.Errorf("Expected filter_complex to use yuv420p for fast concat, got: %s", filterStr)
+		}
+		t.Logf("Sequential filter complex: %s, preset: %s", filterStr, presetStr)
+	})
+
+	t.Run("CustomBitrateOptions", func(t *testing.T) {
+		tempDir := t.TempDir()
+		outputFile := filepath.ToSlash(filepath.Join(tempDir, "bitrate.mp4"))
+		projJSON := `{"width":1920,"height":1080,"fps":30,"clips":[],"tracks":[]}`
+		optsJSON := `{"path":"` + outputFile + `","bitrate":"12M","encoder":"cpu"}`
+
+		_, _, args, err := app.BuildExportArgs(projJSON, optsJSON)
+		if err != nil {
+			t.Fatalf("BuildExportArgs error: %v", err)
+		}
+
+		hasBitrate := false
+		for i, arg := range args {
+			if arg == "-b:v" && i+1 < len(args) && args[i+1] == "12M" {
+				hasBitrate = true
+				break
+			}
+		}
+		if !hasBitrate {
+			t.Errorf("Expected -b:v 12M in args, got: %v", args)
+		}
 	})
 }

@@ -9,10 +9,12 @@ import {
   CheckCircle2,
   ChevronDown,
   CloudOff,
+  Cpu,
   Download,
   FilePlus2,
   FolderOpen,
   Globe,
+  HardDrive,
   Home,
   Info,
   Keyboard,
@@ -49,6 +51,8 @@ import type {
   MediaAsset,
   Project,
   RecentProject,
+  StorageInfo,
+  WhisperModel,
 } from "./core/types";
 import { detachLinkedAudio } from "./core/timelineEdits";
 import { parseSubtitles, stringifySubtitles } from "./core/subtitles";
@@ -71,7 +75,7 @@ import { TextLibrary, TransitionLibrary } from "./components/CreativeLibrary";
 import { addTextPreset, applyTransition, type TextPreset, type TransitionId } from "./core/creativePresets";
 import Player from "./components/Player";
 import Inspector from "./components/Inspector";
-import { toMediaStreamUrl } from "./wails/wailsBridge";
+import { toMediaStreamUrl, normalizeProjectAssets } from "./wails/wailsBridge";
 import { useTranslation, useLanguageStore, type Language, type TranslationKey } from "./i18n";
 import "./styles.css";
 type Modal = "reverse" | "freeze" | "package" | "export" | "settings" | "shortcuts" | "about" | "capcut" | null;
@@ -153,6 +157,8 @@ function ExportDialog({
     [progress, setProgress] = useState<ExportProgress | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
+  const [bitrateMode, setBitrateMode] = useState<string>("auto");
+  const [customBitrate, setCustomBitrate] = useState<string>("8");
   const [scope, setScope] = useState("all");
   const [rangeStart, setRangeStart] = useState("0"), [rangeEnd, setRangeEnd] = useState(String(projectDuration(project)));
   const selectedRange = selectedClipRange(project, selectedIds);
@@ -209,8 +215,15 @@ function ExportDialog({
       job.current = null;
       setBusy(true);
       setProgress({ jobId: "", progress: 0, status: "preparing" });
+      const effectiveBitrate =
+        bitrateMode === "custom"
+          ? `${Math.max(1, Math.min(200, Number(customBitrate) || 8))}M`
+          : bitrateMode === "auto"
+            ? undefined
+            : bitrateMode;
       const result = await window.editorAPI.exportProject(clone(project), {
         ...options,
+        bitrate: effectiveBitrate,
         range: rangeOptions,
         path,
       });
@@ -220,10 +233,103 @@ function ExportDialog({
       setError(error instanceof Error ? error.message : String(error));
     }
   };
+
+  const isVertical = (project.height || 1080) > (project.width || 1920);
+  const baseResolutions = [360, 480, 540, 720, 1080, 1440, 2160];
+  const origWidth = project.width + (project.width % 2);
+  const origHeight = project.height + (project.height % 2);
+
+  const resolutionOptions = baseResolutions.map((val) => {
+    let width: number;
+    let height: number;
+    let tag = "";
+    if (isVertical) {
+      width = val;
+      height = Math.round((val * (project.height || 1080)) / (project.width || 1920) / 2) * 2;
+    } else {
+      height = val;
+      width = Math.round((val * (project.width || 1920)) / (project.height || 1080) / 2) * 2;
+    }
+    if (val === 360) tag = " · SD";
+    else if (val === 480) tag = " · SD";
+    else if (val === 540) tag = " · qHD";
+    else if (val === 720) tag = " · HD";
+    else if (val === 1080) tag = " · FHD";
+    else if (val === 1440) tag = " · 2K QHD";
+    else if (val === 2160) tag = " · 4K UHD";
+
+    return {
+      val,
+      width,
+      height,
+      label: `${val}p${tag} (${width}×${height})`,
+    };
+  });
+
+  const standardFpsList = [24, 25, 30, 50, 60, 120];
+  const fpsOptions = Array.from(new Set([project.fps, ...standardFpsList])).sort(
+    (a, b) => a - b,
+  );
+
+  const getFpsLabel = (fps: number) => {
+    if (fps === 24) return "24 fps (Film / Sinematik)";
+    if (fps === 25) return "25 fps (PAL)";
+    if (fps === 30) return "30 fps (Standar Web / Medsos)";
+    if (fps === 50) return "50 fps (PAL Mulus)";
+    if (fps === 60) return "60 fps (Mulus / 60p)";
+    if (fps === 120) return "120 fps (Ultra High FPS)";
+    return `${fps} fps`;
+  };
+
+  const bitratePresets = [
+    { value: "auto", label: t("export.bitrate.auto") },
+    { value: "2M", label: "2 Mbps (Sangat Ringan / SD)" },
+    { value: "4M", label: "4 Mbps (Standar Web / 480p)" },
+    { value: "8M", label: "8 Mbps (Standar HD / 720p-1080p)" },
+    { value: "12M", label: "12 Mbps (Tinggi / 1080p)" },
+    { value: "16M", label: "16 Mbps (Sangat Tinggi / 2K)" },
+    { value: "25M", label: "25 Mbps (Kualitas Studio / 4K)" },
+    { value: "50M", label: "50 Mbps (Mastering Ultra)" },
+    { value: "custom", label: t("export.bitrate.custom") },
+  ];
+
+  const getEffectiveBitrateMbps = (): number => {
+    if (bitrateMode === "custom") {
+      return Math.max(1, Math.min(200, Number(customBitrate) || 8));
+    }
+    if (bitrateMode !== "auto") {
+      const num = parseFloat(bitrateMode);
+      return isNaN(num) ? 8 : num;
+    }
+    const maxDim = Math.max(options.width, options.height);
+    let baseRate = 8;
+    if (maxDim <= 640) baseRate = 1.2;
+    else if (maxDim <= 854) baseRate = 2.0;
+    else if (maxDim <= 960) baseRate = 2.8;
+    else if (maxDim <= 1280) baseRate = 4.5;
+    else if (maxDim <= 1920) baseRate = 8.0;
+    else if (maxDim <= 2560) baseRate = 16.0;
+    else baseRate = 30.0;
+
+    if (options.quality === "draft") baseRate *= 0.65;
+    if (options.quality === "high") baseRate *= 1.4;
+    return baseRate;
+  };
+
+  const effectiveMbps = getEffectiveBitrateMbps();
+  const estimatedMb = ((effectiveMbps + 0.192) * exportDuration) / 8;
+  const formattedEstimatedSize =
+    estimatedMb < 1
+      ? `${(estimatedMb * 1024).toFixed(0)} KB`
+      : estimatedMb < 1000
+        ? `${estimatedMb.toFixed(1)} MB`
+        : `${(estimatedMb / 1024).toFixed(2)} GB`;
+
   const status = progress?.status;
   return (
     <ModalShell
       title={t("export.title")}
+      wide
       onClose={() => {
         if (!exporting) onClose();
       }}
@@ -273,20 +379,14 @@ function ExportDialog({
                 setOptions((p) => ({ ...p, width, height }));
               }}
             >
-              <option
-                value={`${project.width + (project.width % 2)}:${project.height + (project.height % 2)}`}
-              >
-                {t("export.resolutionOriginal")} · {project.width}×{project.height}
+              <option value={`${origWidth}:${origHeight}`}>
+                {t("export.resolutionOriginal")} · {origWidth}×{origHeight}
               </option>
-              {[720, 1080, 1440, 2160].map((height) => {
-                const width =
-                  Math.round((height * project.width) / project.height / 2) * 2;
-                return (
-                  <option key={height} value={`${width}:${height}`}>
-                    {height}p · {width}×{height}
-                  </option>
-                );
-              })}
+              {resolutionOptions.map((res) => (
+                <option key={`res-${res.val}`} value={`${res.width}:${res.height}`}>
+                  {res.label}
+                </option>
+              ))}
             </select>
           </label>
           <label>
@@ -299,10 +399,47 @@ function ExportDialog({
                 setOptions((p) => ({ ...p, fps: Number(e.target.value) }))
               }
             >
-              {[24, 25, 30, 50, 60].map((fps) => (
-                <option key={fps}>{fps}</option>
+              {fpsOptions.map((fps) => (
+                <option key={fps} value={fps}>
+                  {getFpsLabel(fps)}
+                </option>
               ))}
             </select>
+          </label>
+          <label>
+            {t("export.bitrate")}
+            <div className="export-bitrate-row">
+              <select
+                aria-label={t("export.bitrate")}
+                disabled={exporting}
+                value={bitrateMode}
+                onChange={(e) => setBitrateMode(e.target.value)}
+                style={{ flex: 1 }}
+              >
+                {bitratePresets.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+              {bitrateMode === "custom" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input
+                    aria-label="Custom Bitrate Mbps"
+                    type="number"
+                    min="1"
+                    max="200"
+                    step="1"
+                    className="export-bitrate-custom-input"
+                    placeholder="Mbps"
+                    disabled={exporting}
+                    value={customBitrate}
+                    onChange={(e) => setCustomBitrate(e.target.value)}
+                  />
+                  <span style={{ fontSize: 11, color: "#9aa7bc" }}>Mbps</span>
+                </div>
+              )}
+            </div>
           </label>
           <label>
             {t("export.quality")}
@@ -359,6 +496,10 @@ function ExportDialog({
               <option value="cpu">Software CPU (libx264)</option>
             </select>
           </label>
+        </div>
+        <div className="export-estimate-badge">
+          <span>{t("export.estimatedSize")}</span>
+          <strong>~{formattedEstimatedSize} ({formatTime(exportDuration, project.fps)})</strong>
         </div>
         <p className="field-hint">
           {t("export.privacyHint")}
@@ -588,7 +729,26 @@ export default function App() {
     }>({ ffmpeg: false }),
     [recent, setRecent] = useState<RecentProject[]>([]),
     [recover, setRecover] = useState<Project | null>(null),
+    [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null),
+    [whisperModels, setWhisperModels] = useState<WhisperModel[]>([]),
+    [targetDrive, setTargetDrive] = useState("D:"),
+    [isRelocating, setIsRelocating] = useState(false),
     [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    if (modal === "settings" && window.editorAPI) {
+      window.editorAPI.getStorageInfo?.().then((info) => {
+        if (info) {
+          setStorageInfo(info);
+          const current = (info.activeDrive || "C:").toUpperCase().replace(":", "");
+          setTargetDrive(current === "D" ? "C:" : "D:");
+        }
+      });
+      window.editorAPI.listWhisperModels?.().then((models) => {
+        if (models) setWhisperModels(models);
+      });
+    }
+  }, [modal]);
   useEffect(() => { setSourceAssetId(null); }, [s.project.id, modal, s.selectedIds]);
   useEffect(() => {
     const title = s.project.name ? `${s.project.name} — GoCut` : "GoCut · Video Editor";
@@ -733,9 +893,11 @@ export default function App() {
           setInitialized(true);
           return;
         }
-        const autosave = await window.editorAPI.getAutosave();
-        if (autosave && (autosave.clips.length || autosave.assets.length))
-          setRecover(autosave);
+        if (currentView === "editor") {
+          const autosave = await window.editorAPI.getAutosave();
+          if (autosave && (autosave.clips.length || autosave.assets.length))
+            setRecover(autosave);
+        }
       }
       setInitialized(true);
     }).finally(() => setInitialized(true));
@@ -743,10 +905,14 @@ export default function App() {
       if (toastTimer.current) clearTimeout(toastTimer.current);
     };
   }, []);
+  const handleDroppedRef = useRef<
+    ((paths: string[], files?: File[], isTimelineDrop?: boolean) => Promise<void>) | null
+  >(null);
+
   useEffect(() => {
     if (window.editorAPI?.onNativeFileDrop) {
       return window.editorAPI.onNativeFileDrop((paths) => {
-        void safe(() => importMedia(paths));
+        void safe(() => handleDroppedRef.current?.(paths));
       });
     }
   }, []);
@@ -754,21 +920,28 @@ export default function App() {
     window.editorAPI?.setDirty(s.dirty);
   }, [s.dirty]);
   useEffect(() => {
-    if (!initialized || recover || !window.editorAPI) return;
-    const timer = setTimeout(() => {
-      void window
-        .editorAPI!.autosaveProject(s.project)
-        .catch((error) => notify(t("notify.autoSaveFailed", { error: String(error) })));
+    if (!initialized || !window.editorAPI || currentView !== "editor") return;
+    const timer = setTimeout(async () => {
+      try {
+        if (!window.editorAPI) return;
+        await window.editorAPI.autosaveProject(s.project);
+        if (s.path) {
+          await window.editorAPI.saveProject(s.project, s.path);
+          useEditorStore.getState().markSaved(s.path);
+        }
+      } catch (error) {
+        notify(t("notify.autoSaveFailed", { error: String(error) }));
+      }
     }, 1000);
     return () => clearTimeout(timer);
-  }, [s.project, initialized, recover]);
+  }, [s.project, s.path, initialized, currentView]);
   const confirmReplace = () =>
     !useEditorStore.getState().dirty ||
     window.confirm(t("notify.unsavedChanges"));
-  const importMedia = async (paths?: string[]) => {
+  const importMedia = async (paths?: string[]): Promise<MediaAsset[]> => {
     if (!window.editorAPI) {
       notify(t("notify.browserDropOnly"));
-      return;
+      return [];
     }
     const projectId = useEditorStore.getState().project.id;
     setImporting(true);
@@ -776,14 +949,26 @@ export default function App() {
       const assets = await window.editorAPI.importMedia(paths);
       if (useEditorStore.getState().project.id !== projectId) {
         notify(t("notify.projectSwitched"));
-        return;
+        return [];
       }
-      s.addAssets(assets);
+      useEditorStore.getState().addAssets(assets);
       if (assets.length) notify(t("notify.mediaImported", { count: assets.length }));
+      return assets;
     } finally {
       setImporting(false);
     }
   };
+
+  const capturePlayerThumbnail = (): string | null => {
+    const canvas = document.querySelector<HTMLCanvasElement>(".player-canvas-wrapper canvas");
+    if (!canvas) return null;
+    try {
+      return canvas.toDataURL("image/jpeg", 0.75);
+    } catch {
+      return null;
+    }
+  };
+
   const save = async (as = false) => {
     if (saving.current) {
       notify(t("notify.savingWait"));
@@ -796,7 +981,7 @@ export default function App() {
         url = URL.createObjectURL(blob),
         a = document.createElement("a");
       a.href = url;
-      a.download = s.project.name + ".gocut";
+      a.download = s.project.name + ".gct";
       a.click();
       URL.revokeObjectURL(url);
       notify(t("notify.jsonDownloaded"));
@@ -820,6 +1005,10 @@ export default function App() {
       const unchanged = latest.project === captured;
       if (unchanged) latest.markSaved(file);
       else useEditorStore.setState({ path: file, dirty: true });
+      const thumb = capturePlayerThumbnail();
+      if (thumb && window.editorAPI?.saveProjectCover) {
+        void window.editorAPI.saveProjectCover(file, thumb);
+      }
       notify(unchanged ? t("notify.projectSaved") : t("notify.snapshotSaved"));
       return unchanged;
     } finally {
@@ -834,33 +1023,75 @@ export default function App() {
     }
     const result = await window.editorAPI.openProject();
     if (result) {
+      setRecover(null);
       s.setProject(result.project, result.path);
       setCurrentView("editor");
     }
   };
   const newProject = () => {
     if (confirmReplace()) {
+      setRecover(null);
       s.setProject(createProject());
       setCurrentView("editor");
     }
   };
 
+  const formatProjectError = (err: unknown): string => {
+    if (!err) return "Terjadi kesalahan tidak diketahui.";
+    const raw = err instanceof Error ? err.message : String(err);
+    if (raw.includes("版本") || raw.includes("version")) {
+      return "Versi berkas proyek tidak didukung atau format lama.";
+    }
+    if (raw.includes("素材") || raw.includes("asset")) {
+      return "Terdapat aset media di dalam proyek yang tidak valid.";
+    }
+    if (raw.includes("轨道") || raw.includes("track")) {
+      return "Struktur track timeline di dalam proyek tidak sesuai.";
+    }
+    if (raw.includes("片段") || raw.includes("clip")) {
+      return "Terdapat klip video/audio di timeline yang tidak valid.";
+    }
+    if (raw.includes("项目") || raw.includes("无效") || raw.includes("invalid")) {
+      return `Format data proyek tidak valid (${raw.replace(/[\u4e00-\u9fa5]/g, "").replace(/[()\/\[\]]/g, "").trim() || "data korup"}).`;
+    }
+    return raw;
+  };
+
   const handleOpenProject = async (path: string) => {
+    setRecover(null);
     if (window.editorAPI) {
       try {
         const res = await window.editorAPI.openRecentProject(path);
-        s.setProject(res.project, res.path);
+        let projectToLoad = res.project;
+
+        // Automatically sync with autosaved state if autosave has newer or more clips for this project
+        try {
+          const autosave = await window.editorAPI.getAutosave();
+          if (
+            autosave &&
+            (autosave.id === projectToLoad.id || autosave.name === projectToLoad.name || (!projectToLoad.clips?.length && (autosave.clips?.length || 0) > 0)) &&
+            (autosave.clips?.length ?? 0) >= (projectToLoad.clips?.length ?? 0) &&
+            ((autosave.clips?.length ?? 0) > 0 || (autosave.assets?.length ?? 0) > 0)
+          ) {
+            projectToLoad = autosave;
+            await window.editorAPI.saveProject(projectToLoad, res.path);
+          }
+        } catch {}
+
+        s.setProject(projectToLoad, res.path);
         setCurrentView("editor");
         return;
       } catch (err) {
-        notify(`Gagal membuka proyek: ${err instanceof Error ? err.message : String(err)}`);
+        notify(`Gagal membuka proyek: ${formatProjectError(err)}`);
       }
     }
+    setRecover(null);
     s.setProject(createProject("Untitled Project"), path);
     setCurrentView("editor");
   };
 
   const handleNewProject = () => {
+    setRecover(null);
     s.setProject(createProject());
     setCurrentView("editor");
   };
@@ -868,9 +1099,16 @@ export default function App() {
   const handleBackToHome = async () => {
     try {
       if (window.editorAPI && s.path) {
+        await window.editorAPI.saveProject(s.project, s.path);
         await window.editorAPI.autosaveProject(s.project);
+        useEditorStore.getState().markSaved(s.path);
+        const thumb = capturePlayerThumbnail();
+        if (thumb && window.editorAPI.saveProjectCover) {
+          await window.editorAPI.saveProjectCover(s.path, thumb);
+        }
       }
     } catch {}
+    setRecover(null);
     setCurrentView("dashboard");
   };
 
@@ -1251,12 +1489,137 @@ export default function App() {
       ? `Added ${result.duration.toFixed(2)}s dissolve transition`
       : `Added ${result.duration.toFixed(2)}s transition`);
   };
+  const handleDroppedPathsOrFiles = async (
+    paths: string[],
+    files?: File[],
+    isTimelineDrop?: boolean,
+  ) => {
+    if (!paths.length && (!files || !files.length)) return;
+
+    // 1. Check if any path is a GoCut project file (.gct, .gocut, .reacut)
+    const projectExts = [".gct", ".gocut", ".reacut"];
+    const projectPath = paths.find((p) =>
+      projectExts.some((ext) => p.toLowerCase().endsWith(ext)),
+    );
+    if (projectPath) {
+      if (!confirmReplace()) return;
+      await handleOpenProject(projectPath);
+      return;
+    }
+
+    // 2. Check if any browser File is a GoCut project file (.gct, .reacut, or project .json)
+    if (files && files.length > 0) {
+      const projectFile = files.find(
+        (f) =>
+          projectExts.some((ext) => f.name.toLowerCase().endsWith(ext)) ||
+          f.name.toLowerCase().endsWith(".json"),
+      );
+      if (projectFile && !projectFile.name.toLowerCase().endsWith("draft_content.json")) {
+        try {
+          const text = await projectFile.text();
+          const parsed = JSON.parse(text);
+          if (parsed && Array.isArray(parsed.tracks) && Array.isArray(parsed.clips)) {
+            if (!confirmReplace()) return;
+            const proj = normalizeProjectAssets(parsed as Project);
+            setRecover(null);
+            useEditorStore.getState().setProject(proj, (projectFile as any).path || projectFile.name);
+            setCurrentView("editor");
+            notify(t("notify.projectSaved"));
+            return;
+          }
+        } catch {
+          // Not a valid project JSON, continue to other checks
+        }
+      }
+    }
+
+    // 3. Check if any path is a CapCut draft folder or draft_content.json
+    for (const p of paths) {
+      if (window.editorAPI?.inspectCapcutPath) {
+        try {
+          const selection = await window.editorAPI.inspectCapcutPath(p);
+          if (selection && selection.token) {
+            if (!confirmReplace()) return;
+            const capturedProject = useEditorStore.getState().project;
+            const pending = { selection, capturedProject };
+            capcutImportRef.current = pending;
+            if (selection.requiresTimelineChoice) {
+              setCapcutImport(pending);
+              setCapcutTimelineId(
+                selection.recommendedTimelineId ?? selection.timelines[0]?.id ?? "",
+              );
+              setModal("capcut");
+            } else {
+              await finishCapcutImport(pending, selection.recommendedTimelineId);
+            }
+            setRecover(null);
+            setCurrentView("editor");
+            return;
+          }
+        } catch {
+          // Not a CapCut draft, continue
+        }
+      }
+    }
+
+    // Also check if any dropped File is draft_content.json
+    if (files && files.length > 0) {
+      const draftContentFile = files.find((f) => f.name.toLowerCase() === "draft_content.json");
+      if (draftContentFile) {
+        try {
+          const text = await draftContentFile.text();
+          const imported = importCapcutDraft(text, { name: "Imported Draft" });
+          if (!confirmReplace()) return;
+          setRecover(null);
+          useEditorStore.getState().setProject(imported.project);
+          setCurrentView("editor");
+          if (imported.warnings.length) {
+            notify(imported.warnings.join(" "));
+          }
+          return;
+        } catch {
+          // Continue
+        }
+      }
+    }
+
+    // 4. Otherwise, treat as media assets (images, videos, audio, or media folders)
+    let importedAssets: MediaAsset[] = [];
+    if (paths.length > 0) {
+      importedAssets = await importMedia(paths);
+    } else if (files && files.length > 0) {
+      importedAssets = await browserAssets(files);
+      useEditorStore.getState().addAssets(importedAssets);
+      if (importedAssets.length > 0) {
+        notify(t("notify.mediaImported", { count: importedAssets.length }));
+      }
+    }
+
+    // If currently on dashboard and media was imported, switch to editor so user sees their project!
+    if (importedAssets.length > 0 && currentView === "dashboard") {
+      setRecover(null);
+      setCurrentView("editor");
+    }
+
+    // If dropped onto timeline, add the assets to timeline at playhead
+    if (isTimelineDrop && importedAssets.length > 0) {
+      useEditorStore.getState().addAssetsToTimeline(
+        importedAssets.map((a) => a.id),
+        "ripple",
+        useEditorStore.getState().playhead,
+      );
+    }
+  };
+
+  handleDroppedRef.current = handleDroppedPathsOrFiles;
+
   if (currentView === "dashboard") {
     return (
       <ProjectDashboard
         onOpenProject={(path) => void safe(() => handleOpenProject(path))}
         onNewProject={handleNewProject}
         onOpenExternalFile={() => void safe(open)}
+        onDropFiles={(files, paths) => void safe(() => handleDroppedPathsOrFiles(paths || [], files))}
       />
     );
   }
@@ -1277,17 +1640,16 @@ export default function App() {
         if (!e.dataTransfer.types.includes("Files")) return;
         e.preventDefault();
         const files = Array.from(e.dataTransfer.files);
+        const isTimelineDrop = (e.target as HTMLElement | null)?.closest(".timeline") != null;
         void safe(async () => {
-          const validPaths = window.editorAPI
-            ? files
-                .map((file) => window.editorAPI!.getPathForFile(file))
-                .filter(Boolean)
-            : [];
-          if (validPaths.length > 0) {
-            await importMedia(validPaths);
-          } else {
-            s.addAssets(await browserAssets(files));
-          }
+          const validPaths = window.editorAPI?.resolveFilePaths
+            ? await window.editorAPI.resolveFilePaths(files)
+            : window.editorAPI
+              ? files
+                  .map((file) => window.editorAPI!.getPathForFile(file))
+                  .filter(Boolean)
+              : [];
+          await handleDroppedPathsOrFiles(validPaths, files, isTimelineDrop);
         });
       }}
     >
@@ -1309,7 +1671,7 @@ export default function App() {
               <div className="file-menu">
                 <button
                   onClick={() => void safe(() => handleAction("back-home"))}
-                  style={{ color: "#00f2fe", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}
+                  style={{ color: "var(--accent-light, #9d7dfd)", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}
                 >
                   <Home size={14} />
                   <span>{t("menu.backToHome")}</span>
@@ -1479,6 +1841,24 @@ export default function App() {
                       : s.project
                   }
                   onImport={(paths) => void safe(() => importMedia(paths))}
+                  onImportFolder={() =>
+                    void safe(async () => {
+                      if (window.editorAPI?.importMediaFolder) {
+                        setImporting(true);
+                        try {
+                          const assets = await window.editorAPI.importMediaFolder();
+                          if (!assets || assets.length === 0) {
+                            notify(t("media.noSupportedMedia"));
+                            return;
+                          }
+                          s.addAssets(assets);
+                          notify(t("notify.mediaImported", { count: assets.length }));
+                        } finally {
+                          setImporting(false);
+                        }
+                      }
+                    })
+                  }
                   onPreviewAsset={(assetId) => { s.setPlaying(false); setSourceAssetId(assetId); }}
                   onAddAsset={(assetId) => { setSourceAssetId(null); s.addAssetClip(assetId); }}
                   onRemoveAsset={(assetId) =>
@@ -1917,6 +2297,118 @@ export default function App() {
               </div>
             </div>
 
+            {/* Storage / Custom Drive Card */}
+            <div className="settings-section">
+              <div className="settings-section-header">
+                <HardDrive size={15} />
+                <h3>Penyimpanan & Drive Data</h3>
+              </div>
+              <p className="muted">
+                Seluruh proyek, thumbnail, cache render, dan model AI disimpan di lokasi ini untuk menjaga Drive C: tetap lega.
+              </p>
+              {storageInfo && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "8px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "12px", background: "rgba(99, 59, 251, 0.2)", color: "#a78bfa", padding: "2px 8px", borderRadius: "4px", fontWeight: 600 }}>
+                      Drive Aktif: {storageInfo.activeDrive} {storageInfo.isPortable ? "(Portable)" : ""}
+                    </span>
+                  </div>
+                  <code className="engine-path-pill" style={{ wordBreak: "break-all" }}>
+                    {storageInfo.dataDir}
+                  </code>
+                </div>
+              )}
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Pindah ke Drive:</span>
+                <select
+                  value={targetDrive}
+                  onChange={(e) => setTargetDrive(e.target.value)}
+                  style={{ padding: "4px 8px", borderRadius: "6px", background: "var(--bg-surface)", color: "var(--text-primary)", border: "1px solid var(--border-color)" }}
+                >
+                  <option value="D:">Drive D:</option>
+                  <option value="E:">Drive E:</option>
+                  <option value="F:">Drive F:</option>
+                  <option value="C:">Drive C:</option>
+                </select>
+                <button
+                  disabled={isRelocating}
+                  onClick={() =>
+                    void safe(async () => {
+                      if (!window.editorAPI?.relocateStorage) return;
+                      setIsRelocating(true);
+                      try {
+                        const updated = await window.editorAPI.relocateStorage(targetDrive);
+                        setStorageInfo(updated);
+                        notify(`Folder data berhasil dipindahkan ke ${updated.activeDrive}`);
+                      } finally {
+                        setIsRelocating(false);
+                      }
+                    })
+                  }
+                >
+                  {isRelocating ? "Memindahkan..." : "Pindahkan Data"}
+                </button>
+              </div>
+            </div>
+
+            {/* Whisper Models Card */}
+            <div className="settings-section">
+              <div className="settings-section-header">
+                <Cpu size={15} />
+                <h3>Model AI Whisper (Auto-Subtitle)</h3>
+              </div>
+              <p className="muted">
+                Model transkripsi suara lokal dijalankan 100% offline di perangkat Anda tanpa mengirim data suara ke cloud.
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "8px" }}>
+                {whisperModels.map((m) => (
+                  <div
+                    key={m.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "6px 10px",
+                      background: "rgba(255, 255, 255, 0.03)",
+                      borderRadius: "6px",
+                      border: "1px solid rgba(255, 255, 255, 0.06)",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: "13px", fontWeight: 500 }}>{m.name}</div>
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                        {m.filename} (~{m.sizeMB} MB)
+                      </span>
+                    </div>
+                    {m.installed ? (
+                      <span style={{ fontSize: "11px", background: "rgba(34, 197, 94, 0.15)", color: "#4ade80", padding: "2px 8px", borderRadius: "12px", display: "flex", alignItems: "center", gap: "4px" }}>
+                        <Check size={12} /> Terpasang
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)", padding: "2px 8px" }}>
+                        Belum Diunduh
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() =>
+                  void safe(async () => {
+                    if (!window.editorAPI?.importWhisperModel) return;
+                    const res = await window.editorAPI.importWhisperModel();
+                    if (res) {
+                      notify(`Model ${res} berhasil diimpor!`);
+                      const models = await window.editorAPI.listWhisperModels?.();
+                      if (models) setWhisperModels(models);
+                    }
+                  })
+                }
+              >
+                Impor File Model (.bin)
+              </button>
+            </div>
+
             {/* Recent Projects Card */}
             <div className="settings-section">
               <div className="settings-section-header">
@@ -1991,9 +2483,18 @@ export default function App() {
             <button
               className="primary"
               onClick={() => {
-                s.setProject(recover);
-                setRecover(null);
-                notify(t("recover.restoredNotify"));
+                try {
+                  const currentPath = s.path;
+                  const normalized = normalizeProjectAssets(recover);
+                  s.setProject(normalized, currentPath);
+                  if (currentPath && window.editorAPI) {
+                    void window.editorAPI.saveProject(normalized, currentPath);
+                  }
+                  setRecover(null);
+                  notify(t("recover.restoredNotify"));
+                } catch (e) {
+                  notify(`Gagal memulihkan proyek: ${formatProjectError(e)}`);
+                }
               }}
             >
               {t("recover.restore")}

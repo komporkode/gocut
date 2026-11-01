@@ -1,6 +1,6 @@
 {
   "name": "gocut",
-  "version": "0.7.0-beta",
+  "version": "0.8.0-beta",
   "private": true,
   "description": "GoCut - Fast, lightweight offline desktop video editor powered by Go, Wails, and React",
   "type": "module",

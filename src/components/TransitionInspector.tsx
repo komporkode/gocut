@@ -35,7 +35,7 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
     <aside className="inspector panel tl-transition-inspector">
       <div className="panel-heading" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Sparkles size={16} className="text-cyan-400" />
+          <Sparkles size={16} style={{ color: "var(--accent-light, #9d7dfd)" }} />
           <span style={{ fontWeight: 600 }}>Properti Transisi</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -79,13 +79,13 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
             </div>
           </div>
           <div style={{
-            background: 'rgba(0, 196, 204, 0.12)',
-            border: '1px solid rgba(0, 196, 204, 0.5)',
+            background: 'var(--accent-soft, rgba(99, 59, 251, 0.15))',
+            border: '1px solid var(--accent-border, rgba(99, 59, 251, 0.45))',
             borderRadius: '4px',
             padding: '3px 8px',
             fontSize: '11px',
             fontWeight: 600,
-            color: '#00c4cc',
+            color: 'var(--accent-light, #9d7dfd)',
           }}>
             {transition.duration.toFixed(2)}s
           </div>
@@ -133,7 +133,7 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
             step="0.05"
             value={transition.duration}
             onChange={(e) => resizeTransitionRecord(transition.id, parseFloat(e.target.value))}
-            style={{ width: '100%', accentColor: '#00c4cc', cursor: 'pointer' }}
+            style={{ width: '100%', accentColor: '#633bfb', cursor: 'pointer' }}
           />
 
           {/* Quick preset buttons */}
@@ -146,7 +146,7 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
                   flex: 1,
                   padding: '4px 0',
                   fontSize: '11px',
-                  background: Math.abs(transition.duration - dur) < 0.04 ? '#008899' : '#1e2530',
+                  background: Math.abs(transition.duration - dur) < 0.04 ? '#633bfb' : '#1e2530',
                   color: Math.abs(transition.duration - dur) < 0.04 ? '#ffffff' : '#94a3b8',
                   border: '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '4px',
@@ -168,7 +168,7 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
             style={{
               width: '100%',
               padding: '9px 12px',
-              background: '#008899',
+              background: '#633bfb',
               border: 'none',
               borderRadius: '6px',
               color: '#ffffff',

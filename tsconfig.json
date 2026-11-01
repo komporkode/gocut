@@ -28,5 +28,10 @@
     "vite.config.ts",
     "vitest.config.ts",
     "plugin/ui"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "wailsjs"
   ]
 }

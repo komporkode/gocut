@@ -128,7 +128,7 @@
   align-items: center;
 }
 .toggle-switch.is-on {
-  background: #00e5c9;
+  background: var(--accent, #633bfb);
 }
 .toggle-thumb {
   width: 14px;
