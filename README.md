@@ -257,3 +257,4 @@ GoCut is open-source software licensed under the [**MIT License**](LICENSE).
 - **Upstream Origin**: Forked and modernized from [ReaCut](https://github.com/Xiangyu-CAS/rea-capcut) by Xiangyu-CAS and community contributors.
 - **REA Research**: Informed by [REA](https://github.com/morluto/rea) for research into CapCut / Jianying draft interoperability.
 - **Open Source Communities**: Special thanks to the Go, Wails, React, Vite, FFmpeg, Zustand, and Lucide project communities.
+- **Code Signing**: Free code signing provided by the [SignPath Foundation](https://signpath.org) for open-source software.
