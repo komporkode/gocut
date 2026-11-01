@@ -133,6 +133,22 @@ $Shortcut.Save()
 }
 
 func main() {
+	isCLI := false
+	for _, arg := range os.Args[1:] {
+		if arg == "--cli" || arg == "-c" || arg == "--console" {
+			isCLI = true
+			break
+		}
+	}
+
+	if isCLI {
+		runCLI()
+	} else {
+		runGUI()
+	}
+}
+
+func runCLI() {
 	fmt.Println("==================================================")
 	fmt.Println("       GoCut Web Downloader & Installer           ")
 	fmt.Println("==================================================")

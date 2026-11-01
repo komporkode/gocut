@@ -39,9 +39,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; Biner Utama GoCut
 Source: "..\build\bin\{#MyAppExeName}"; DestDir: "{app}\app"; Flags: ignoreversion
 
-; Media Tools (FFmpeg & FFprobe)
-Source: "..\media-tools\ffmpeg.exe"; DestDir: "{app}\app\media-tools"; Flags: ignoreversion skipifsourcedoesntexist
-Source: "..\media-tools\ffprobe.exe"; DestDir: "{app}\app\media-tools"; Flags: ignoreversion skipifsourcedoesntexist
+; Media Tools (FFmpeg & FFprobe) - Pintar: Lewati ekstraksi jika PC sudah memiliki FFmpeg
+Source: "..\media-tools\ffmpeg.exe"; DestDir: "{app}\app\media-tools"; Flags: ignoreversion; Check: ShouldInstallFFmpeg
+Source: "..\media-tools\ffprobe.exe"; DestDir: "{app}\app\media-tools"; Flags: ignoreversion; Check: ShouldInstallFFmpeg
 
 [Dirs]
 Name: "{app}\data"
@@ -65,6 +65,18 @@ var
   SelectedDrive: String;
   WhisperCheckBox: TCheckBox;
   DownloadPage: TDownloadWizardPage;
+
+function HasSystemFFmpeg(): Boolean;
+begin
+  Result := (FileSearch('ffmpeg.exe', GetEnv('PATH')) <> '') or
+            FileExists('C:\ffmpeg\ffmpeg.exe') or
+            FileExists('C:\ffmpeg\bin\ffmpeg.exe');
+end;
+
+function ShouldInstallFFmpeg(): Boolean;
+begin
+  Result := not HasSystemFFmpeg();
+end;
 
 function GetSelectedDrivePath(Param: String): String;
 begin
@@ -106,7 +118,10 @@ begin
   
   Lbl := TLabel.Create(DrivePage);
   Lbl.Parent := DrivePage.Surface;
-  Lbl.Caption := 'GoCut akan menyimpan aplikasi dan seluruh data proyek/model AI di drive pilihan:';
+  if HasSystemFFmpeg() then
+    Lbl.Caption := 'FFmpeg terdeteksi di sistem Anda (ekstraksi FFmpeg bawaan dilewati untuk hemat ruang disk):'
+  else
+    Lbl.Caption := 'GoCut akan menyimpan aplikasi dan seluruh data proyek/model AI di drive pilihan:';
   Lbl.Top := 0;
   Lbl.Left := 0;
   Lbl.Width := DrivePage.SurfaceWidth;
