@@ -12,10 +12,33 @@ import (
 )
 
 var (
-	resolvedCache sync.Map // map[string]string: raw/base -> resolved absolute path
-	searchDirsMu  sync.RWMutex
-	searchDirs    []string
+	resolvedCache   sync.Map // map[string]string: raw/base -> resolved absolute path
+	searchDirsMu    sync.RWMutex
+	searchDirs      []string
+	solidCacheDirMu sync.RWMutex
+	solidCacheDir   string
 )
+
+// SetSolidCacheDir sets the cache directory for solid color assets (e.g. <gocut>/data/cache/solids).
+func SetSolidCacheDir(dir string) {
+	if dir == "" {
+		return
+	}
+	clean := filepath.Clean(dir)
+	solidCacheDirMu.Lock()
+	defer solidCacheDirMu.Unlock()
+	solidCacheDir = clean
+	_ = os.MkdirAll(clean, 0755)
+}
+
+func getSolidCacheDir() string {
+	solidCacheDirMu.RLock()
+	defer solidCacheDirMu.RUnlock()
+	if solidCacheDir != "" {
+		return solidCacheDir
+	}
+	return filepath.Join(os.TempDir(), "gocut", "solids")
+}
 
 // RegisterSearchDir adds a directory to prioritize when resolving missing/relative assets.
 func RegisterSearchDir(dir string) {
@@ -73,7 +96,7 @@ func ResolvePath(rawPath string) (string, error) {
 		if color == "" {
 			color = "#000000"
 		}
-		cacheDir := filepath.Join(os.TempDir(), "reacut", "solids")
+		cacheDir := getSolidCacheDir()
 		_ = os.MkdirAll(cacheDir, 0755)
 		safeName := strings.ReplaceAll(color, "#", "") + ".svg"
 		solidFile := filepath.Join(cacheDir, safeName)

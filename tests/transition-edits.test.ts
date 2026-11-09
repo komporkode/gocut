@@ -44,16 +44,16 @@ describe('transitionEdits core', () => {
     const c2 = project.clips.find((c) => c.id === 'clip-2')!;
     const c3 = project.clips.find((c) => c.id === 'clip-3')!;
 
-    // clip-1 is untouched
+    // clip-1 duration extends by half (0.5s)
     expect(c1.start).toBe(0);
-    expect(c1.duration).toBe(4);
+    expect(c1.duration).toBe(4.5);
 
-    // clip-2 starts 1.0s earlier (overlaps clip-1 by 1.0s)
-    expect(c2.start).toBe(3.0);
+    // clip-2 starts half (0.5s) earlier at 3.5s (overlaps clip-1 by 1.0s)
+    expect(c2.start).toBe(3.5);
     expect(c2.duration).toBe(4);
 
-    // clip-3 rippled left by 1.0s
-    expect(c3.start).toBe(7.0);
+    // clip-3 rippled left by half (0.5s)
+    expect(c3.start).toBe(7.5);
   });
 
   it('clamps transition duration to minimum duration of adjacent clips', () => {
@@ -76,16 +76,16 @@ describe('transitionEdits core', () => {
     const expanded = resizeTransition(project, transition.id, 1.5);
     const expC2 = expanded.clips.find((c) => c.id === 'clip-2')!;
     const expC3 = expanded.clips.find((c) => c.id === 'clip-3')!;
-    expect(expC2.start).toBe(2.5);
-    expect(expC3.start).toBe(6.5);
+    expect(expC2.start).toBeCloseTo(3.266, 2);
+    expect(expC3.start).toBeCloseTo(7.233, 2);
     expect(expanded.transitions?.find((t) => t.id === transition.id)?.duration).toBe(1.5);
 
     // Resize to 0.5s
     const shrunk = resizeTransition(expanded, transition.id, 0.5);
     const shrC2 = shrunk.clips.find((c) => c.id === 'clip-2')!;
     const shrC3 = shrunk.clips.find((c) => c.id === 'clip-3')!;
-    expect(shrC2.start).toBe(3.5);
-    expect(shrC3.start).toBe(7.5);
+    expect(shrC2.start).toBeCloseTo(3.766, 2);
+    expect(shrC3.start).toBeCloseTo(7.733, 2);
     expect(shrunk.transitions?.find((t) => t.id === transition.id)?.duration).toBe(0.5);
   });
 
@@ -118,8 +118,8 @@ describe('transitionEdits core', () => {
     const c3 = res.clips.find((c) => c.id === 'clip-3')!;
 
     expect(c1.start).toBe(0);
-    expect(c2.start).toBe(3.5);
-    expect(c3.start).toBe(7.0);
+    expect(c2.start).toBeCloseTo(3.766, 2);
+    expect(c3.start).toBeCloseTo(7.533, 2);
   });
 });
 

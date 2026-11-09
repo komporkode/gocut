@@ -50,10 +50,15 @@ func (h *MediaHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract file path from query ?path= or URL path
+	// Extract file path from query ?path= or URL path (/media-stream/... or /media/...)
 	filePath := r.URL.Query().Get("path")
 	if filePath == "" {
-		trimmed := strings.TrimPrefix(r.URL.Path, "/media-stream")
+		var trimmed string
+		if strings.HasPrefix(r.URL.Path, "/media-stream") {
+			trimmed = strings.TrimPrefix(r.URL.Path, "/media-stream")
+		} else if strings.HasPrefix(r.URL.Path, "/media") {
+			trimmed = strings.TrimPrefix(r.URL.Path, "/media")
+		}
 		trimmed = strings.TrimPrefix(trimmed, "/")
 		var err error
 		filePath, err = url.PathUnescape(trimmed)

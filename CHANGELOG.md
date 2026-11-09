@@ -1,5 +1,41 @@
 # Catatan Rilis & Perubahan (Changelog)
 
+## [Unreleased]
+
+## [0.9.0-beta] — 2026-11-05 (Pro Effects, Film Grain, Compositing, Timeline Workflow & Hardware Export Suite)
+
+### Added
+- **Film Grain & Sensor Texture Suite (8 Gaya Emulsi & Sensor)**:
+  - 8 preset terkalibrasi (`Kodak 35mm`, `Fuji Eterna`, `16mm Analog`, `Super 8mm`, `PRNU Cloak`, `High-ISO`, `Micro Dither`, `CRT / VHS`) dengan kontrol Mesin Noise (`Analog Film` / `Digital CMOS`), Gerakan (`Dinamis 24–60 FPS` / `Statis`), Ukuran Butiran (`Micro`, `Fine`, `Medium`, `Coarse`, `Heavy`), kurva proteksi sorotan $\sin(L \cdot \pi)$, serta dispersi RGB kromatik organik.
+- **Suite Blur & Stylize Sinematik**:
+  - Efek `Gaussian Blur`, `Motion / Directional Blur` (dengan sudut `0°–360°`), dan `Radial Zoom Blur` (`0–50px`), disertai kontrol `Vignette`, `Chromatic Aberration (RGB Split)`, `CRT / VHS Scanlines`, `Halation / Glow Bloom`, dan `Crisp Sharpen`.
+- **Mode Penerapan Ganda: Per-Clip & Adjustment Layer**:
+  - Tombol `+ Adjustment Layer` di panel Efek dan dukungan *drag-and-drop* efek ke area kosong track timeline untuk membuat klip Adjustment Layer yang memproses seluruh layer di bawahnya secara real-time di Canvas maupun saat ekspor FFmpeg.
+- **Layer Blend Modes (Compositing)**:
+  - Dukungan mode blending (`Normal`, `Screen`, `Multiply`, `Overlay`, `Soft Light`, `Hard Light`, `Color Dodge`) di Inspector, pratinjau Canvas (`globalCompositeOperation`), dan filter `blend` FFmpeg.
+- **Copy & Paste Attributes (`Ctrl+Alt+C` / `Ctrl+Alt+V`)**:
+  - Menyalin dan menempelkan atribut Color, Film Grain, Blur, Stylize, Blend Mode, dan Transform antar klip secara instan lewat menu konteks klik kanan atau shortcut keyboard.
+- **Timeline Markers (`M`) & Track Solo (`S`)**:
+  - Penanda waktu/catatan di ruler timeline dengan dukungan *magnetic snapping*, serta tombol Solo (`S`) di header track untuk mengisolasi track visual/audio saat preview maupun ekspor.
+- **1-Click Platform Export Presets, HEVC/Audio-Only & Akselerasi GPU**:
+  - 6 preset platform sekali klik (`YouTube 4K Ultra`, `YouTube 1080p`, `TikTok / Reels / Shorts`, `HEVC H.265 Hemat`, `WhatsApp / Web Cepat`, `Audio Only MP3`), pilihan codec `H.264` / `H.265 (HEVC)`, format audio-only (`MP3` / `WAV`), serta opsi akselerasi GPU spesifik (`NVENC`, `QSV`, `AMF`).
+
+### Changed
+- **Standarisasi Floating Menu & Desain Responsif Toolbar**:
+  - Menyatukan seluruh *floating menu* (`TimelineContextMenu`, dropdown `+ Import Media`, menu aksi track, dan dropdown topbar) ke token desain `.gocut-floating-menu` dengan kaca gelap (`#16161f`), border halus, dan highlight aksen ungu.
+  - Memperbaiki *clipping* kontrol pada `Player` dan `Timeline` saat panel diubah ukurannya menjadi sempit.
+- **Optimasi Performa Canvas 60 FPS & Deduplikasi Arsitektur UI**:
+  - Mengganti kalkulasi `Math.sin` dan *hash* per-piksel pada `applyFilmGrainToPixels` dengan *Lookup Table* (`SIN_LUMA_LUT` 256-entri & `NOISE_TABLE` 4096-entri) serta *canvas pooling* bebas alokasi GC di `previewLayers.ts`.
+  - Mengekstrak komponen bersama `ProEffectsControls.tsx` untuk memangkas ~560 baris duplikasi kode antara `EffectsPanel.tsx` dan `Inspector.tsx`.
+
+### Fixed
+- Memperbaiki `pasteClipAttributes` agar menyalin klip bersih (*clean clip*) turut mereset `effects` dan `blendMode` pada klip tujuan.
+- Memperbaiki klik kartu preset *Blur & Stylize* saat tidak ada klip terpilih agar membuat 1 *Adjustment Layer* secara atomik (bukan 2 layer terpisah).
+- Menambahkan dukungan penuh filter `blend=all_mode=...` di `BuildExportArgs` (`app.go`) agar ekspor video 100% identik dengan pratinjau *Blend Mode* di Canvas.
+
+### Security
+- Memperketat *trust boundary* pada `SaveMediaCache` di `app.go` menggunakan sanitasi `filepath.Base` dan verifikasi prefix direktori absolut untuk mencegah *path traversal* saat menyimpan aset cache.
+
 ## 0.8.0 — 2026-11-01 (Penyimpanan Drive Mandiri, Whisper AI Lokal & Dual Installer)
 
 - **Penyimpanan Drive Mandiri & Mode Portabel (Custom Drive Storage)**:

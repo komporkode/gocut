@@ -286,3 +286,199 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+.effects-add-adjustment-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  color: #e9d5ff !important;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.28), rgba(79, 70, 229, 0.28)) !important;
+  border: 1px solid rgba(167, 139, 250, 0.45) !important;
+  border-radius: 6px !important;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.effects-add-adjustment-btn:hover {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.45), rgba(79, 70, 229, 0.45)) !important;
+  border-color: rgba(196, 181, 253, 0.75) !important;
+}
+.effects-tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.effects-tabs button {
+  white-space: nowrap;
+}
+
+/* Film Grain & Pro Effects Suite (Shared by EffectsPanel & Inspector) */
+.grain-suite {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+.grain-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #7c899e;
+  text-transform: uppercase;
+}
+.grain-enable-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 500;
+  color: #c9d4e3;
+  text-transform: none;
+  cursor: pointer;
+}
+.grain-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.grain-preset-card {
+  display: flex !important;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 3px;
+  padding: 9px 11px !important;
+  background: #141821 !important;
+  border: 1.5px solid #242b38 !important;
+  border-radius: 8px !important;
+  text-align: left;
+  transition: border-color 120ms ease, background 120ms ease, box-shadow 120ms ease;
+}
+.grain-preset-card:hover:not(:disabled) {
+  background: #19202c !important;
+  border-color: #3a4659 !important;
+}
+.grain-preset-card.is-active {
+  background: #162032 !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.35);
+}
+.grain-preset-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #f1f5f9;
+  font-size: 11.5px;
+}
+.grain-preset-top strong {
+  font-weight: 700;
+  color: #f8fafc;
+}
+.grain-preset-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+.grain-preset-card small {
+  font-size: 10px;
+  color: #6c7a91;
+  font-weight: 400;
+}
+.grain-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.grain-control-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: #7c899e;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.grain-segmented {
+  display: inline-flex;
+  background: #11151d;
+  border: 1px solid #242c3a;
+  border-radius: 7px;
+  padding: 2px;
+  gap: 2px;
+}
+.grain-segmented button {
+  padding: 5px 10px !important;
+  border-radius: 5px !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  color: #8b99af !important;
+  background: transparent !important;
+}
+.grain-segmented button.is-active {
+  background: #2563eb !important;
+  color: #ffffff !important;
+}
+.grain-slider-block {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.grain-slider-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #aebbd0;
+}
+.grain-slider-header strong {
+  color: #38bdf8;
+  font-weight: 700;
+  font-size: 11px;
+}
+.grain-slider-block input[type="range"] {
+  width: 100%;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+.grain-size-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.grain-size-pills button {
+  padding: 4px 8px !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+  background: #141923 !important;
+  border: 1px solid #262f3f !important;
+  color: #9fb0c7 !important;
+}
+.grain-size-pills button.is-active {
+  background: #2563eb !important;
+  border-color: #3b82f6 !important;
+  color: #ffffff !important;
+}
+.grain-checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 2px;
+}
+.grain-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #abb8cc;
+  cursor: pointer;
+}
+.grain-checkbox-row input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: #2563eb;
+  cursor: pointer;
+}

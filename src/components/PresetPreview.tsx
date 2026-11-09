@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Adjustments, Clip } from "../core/types";
+import type {
+  Adjustments,
+  BlurEffect,
+  Clip,
+  ClipEffects,
+  FilmGrainEffect,
+  StylizeEffect,
+} from "../core/types";
 import { DEFAULT_ADJUSTMENTS } from "../core/defaults";
 import { applyColorAdjustments } from "../core/color";
 import {
@@ -26,12 +33,18 @@ export default function PresetPreview({
   motion,
   transition,
   adjustments,
+  effects,
   label,
 }: {
   text?: TextPreset;
   motion?: MotionId;
   transition?: TransitionId;
   adjustments?: Partial<Adjustments>;
+  effects?: {
+    grain?: Partial<FilmGrainEffect>;
+    blur?: Partial<BlurEffect>;
+    stylize?: Partial<StylizeEffect>;
+  };
   label: string;
 }) {
   const { t } = useTranslation();
@@ -112,6 +125,45 @@ export default function PresetPreview({
           ctx.restore();
         }
       }
+      if (effects) {
+        if (
+          effects.blur?.enabled &&
+          typeof effects.blur.radius === "number" &&
+          effects.blur.radius > 0
+        ) {
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          ctx.filter = `blur(${Math.min(14, effects.blur.radius * 0.35)}px)`;
+          ctx.drawImage(canvas.current!, 0, 0);
+          ctx.restore();
+        }
+        if (effects.stylize?.enabled && effects.stylize.vignette) {
+          ctx.save();
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+          const grad = ctx.createRadialGradient(160, 90, 40, 160, 90, 180);
+          grad.addColorStop(0, "rgba(0,0,0,0)");
+          grad.addColorStop(1, `rgba(0,0,0,${Math.min(0.85, (effects.stylize.vignette / 100) * 0.9)})`);
+          ctx.fillStyle = grad;
+          ctx.fillRect(0, 0, 320, 180);
+          ctx.restore();
+        }
+        if (
+          effects.grain?.enabled &&
+          typeof effects.grain.intensity === "number" &&
+          effects.grain.intensity > 0
+        ) {
+          const pixels = ctx.getImageData(0, 0, 320, 180);
+          const data = pixels.data;
+          const amt = (effects.grain.intensity / 100) * 26;
+          for (let i = 0; i < data.length; i += 4) {
+            const noise = (Math.random() - 0.5) * amt;
+            data[i] = Math.max(0, Math.min(255, data[i] + noise));
+            data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + noise));
+            data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + noise));
+          }
+          ctx.putImageData(pixels, 0, 0);
+        }
+      }
     };
     const start = performance.now();
     const tick = () => {
@@ -137,7 +189,7 @@ export default function PresetPreview({
       cancelled = true;
       cancelAnimationFrame(frame);
     };
-  }, [scene, playing, adjustments, transition]);
+  }, [scene, playing, adjustments, effects, transition]);
   return (
     <button
       className="preset-preview"

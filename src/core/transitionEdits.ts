@@ -45,18 +45,19 @@ export function addTransition(
     duration: clampedDur,
   };
 
-  // Overlap incoming clip and ripple all downstream clips on the same track
-  const delta = clampedDur;
-  toClip.start = snapToFrame(fromClip.start + fromClip.duration - delta, p.fps);
+  // Symmetrical overlap across cut: half on left clip (fromClip), half on right clip (toClip)
+  const half = snapToFrame(clampedDur / 2, p.fps);
+  fromClip.duration = snapToFrame(fromClip.duration + half, p.fps);
+  toClip.start = snapToFrame(fromClip.start + fromClip.duration - clampedDur, p.fps);
 
   // Set audio fade crossfade helpers
   fromClip.audioFadeOut = clampedDur;
   toClip.audioFadeIn = clampedDur;
 
-  // Ripple subsequent clips on track
+  // Ripple subsequent clips on track by half
   for (const c of p.clips) {
     if (c.trackId === trackId && c.id !== toClip.id && c.id !== fromClip.id && c.start >= toClip.start) {
-      c.start = snapToFrame(c.start - delta, p.fps);
+      c.start = snapToFrame(c.start - half, p.fps);
     }
   }
 
@@ -82,16 +83,18 @@ export function resizeTransition(
 
   const maxDur = Math.min(fromClip.duration, toClip.duration);
   const clampedDur = snapToFrame(Math.max(1 / p.fps, Math.min(newDuration, maxDur)), p.fps);
-  const delta = clampedDur - trans.duration; // positive means overlap increases (downstream moves left)
+  const deltaDur = clampedDur - trans.duration; // positive means overlap increases (downstream moves left)
+  const halfDelta = snapToFrame(deltaDur / 2, p.fps);
 
   trans.duration = clampedDur;
-  toClip.start = snapToFrame(toClip.start - delta, p.fps);
+  fromClip.duration = snapToFrame(fromClip.duration + halfDelta, p.fps);
+  toClip.start = snapToFrame(fromClip.start + fromClip.duration - clampedDur, p.fps);
   fromClip.audioFadeOut = clampedDur;
   toClip.audioFadeIn = clampedDur;
 
   for (const c of p.clips) {
     if (c.trackId === trans.trackId && c.id !== toClip.id && c.id !== fromClip.id && c.start >= toClip.start) {
-      c.start = snapToFrame(c.start - delta, p.fps);
+      c.start = snapToFrame(c.start - halfDelta, p.fps);
     }
   }
 
@@ -111,14 +114,15 @@ export function removeTransition(project: Project, transitionId: string): Projec
   const toClip = p.clips.find((c) => c.id === trans.toClipId);
 
   if (fromClip && toClip) {
-    const shift = trans.duration;
+    const half = snapToFrame(trans.duration / 2, p.fps);
+    fromClip.duration = snapToFrame(fromClip.duration - half, p.fps);
     toClip.start = snapToFrame(fromClip.start + fromClip.duration, p.fps);
     fromClip.audioFadeOut = 0;
     toClip.audioFadeIn = 0;
 
     for (const c of p.clips) {
-      if (c.trackId === trans.trackId && c.id !== toClip.id && c.id !== fromClip.id && c.start >= toClip.start - shift - 0.001) {
-        c.start = snapToFrame(c.start + shift, p.fps);
+      if (c.trackId === trans.trackId && c.id !== toClip.id && c.id !== fromClip.id && c.start >= toClip.start - half - 0.001) {
+        c.start = snapToFrame(c.start + half, p.fps);
       }
     }
   }

@@ -15,6 +15,7 @@ import {
   MoreHorizontal,
   Music2,
   Palette,
+  Pencil,
   Plus,
   Play,
   Search,
@@ -56,6 +57,11 @@ export function extractFolderTree(assets: MediaAsset[]): FolderItem[] {
   return result;
 }
 
+export interface ImportingMediaItem {
+  id: string;
+  name: string;
+}
+
 export interface MediaLibraryProps {
   project: Project;
   onImport: (paths?: string[]) => void;
@@ -63,6 +69,7 @@ export interface MediaLibraryProps {
   onAddAsset: (assetId: string) => void;
   onRemoveAsset: (assetId: string) => void;
   importing?: boolean;
+  importingItems?: ImportingMediaItem[];
   onImportFiles?: (files: File[]) => void;
   onRevealAsset?: (assetId: string) => void;
   onPreviewAsset?: (assetId: string) => void;
@@ -88,6 +95,7 @@ export default function MediaLibrary({
   onAddAsset,
   onRemoveAsset,
   importing = false,
+  importingItems = [],
   onImportFiles,
   onRevealAsset,
   onPreviewAsset,
@@ -306,7 +314,12 @@ export default function MediaLibrary({
             className="media-context"
             onClick={(event) => event.stopPropagation()}
           >
-            {onPreviewAsset && <button onClick={() => { onPreviewAsset(asset.id);setMenu(null); }}><Play size={13} /> {t("media.previewMedia")}</button>}
+            {onPreviewAsset && (
+              <button onClick={() => { onPreviewAsset(asset.id); setMenu(null); }}>
+                <span className="file-menu-icon"><Play size={14} /></span>
+                <span className="file-menu-label">{t("media.previewMedia")}</span>
+              </button>
+            )}
             <button
               disabled={asset.missing}
               onClick={() => {
@@ -314,7 +327,8 @@ export default function MediaLibrary({
                 setMenu(null);
               }}
             >
-              <Plus size={13} /> {t("media.addToTimeline")}
+              <span className="file-menu-icon"><Plus size={14} /></span>
+              <span className="file-menu-label">{t("media.addToTimeline")}</span>
             </button>
             {onRevealAsset && (
               <button
@@ -323,19 +337,20 @@ export default function MediaLibrary({
                   setMenu(null);
                 }}
               >
-                <FolderOpen size={13} />{" "}
-                {asset.missing ? t("media.relink") : t("media.revealInFolder")}
+                <span className="file-menu-icon"><FolderOpen size={14} /></span>
+                <span className="file-menu-label">{asset.missing ? t("media.relink") : t("media.revealInFolder")}</span>
               </button>
             )}
             <button
-              className="media-context-remove"
+              className="media-context-remove is-danger"
               onClick={() => {
                 onRemoveAsset(asset.id);
                 setMenu(null);
                 if (selected === asset.id) setSelected(null);
               }}
             >
-              <Trash2 size={13} /> {t("media.delete")}
+              <span className="file-menu-icon"><Trash2 size={14} /></span>
+              <span className="file-menu-label">{t("media.delete")}</span>
             </button>
           </div>
         )}
@@ -378,314 +393,6 @@ export default function MediaLibrary({
           event.target.value = "";
         }}
       />
-      <div className="media-top">
-        <div className="media-top-title">
-          <FolderOpen size={15} />
-          <span>{t("media.projectMedia")}</span>
-          <b>{project.assets.length}</b>
-        </div>
-        <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-          <button
-            className="media-import"
-            style={{ padding: "0 8px" }}
-            title="Create Solid Color (Color Matte)"
-            aria-label="Create Solid Color"
-            onClick={() => setShowColorPicker(!showColorPicker)}
-          >
-            <Palette size={13} />
-          </button>
-          <div className="media-import-split" style={{ position: "relative", display: "inline-flex" }}>
-            <button
-              className="media-import"
-              onClick={startImport}
-              disabled={importing}
-              style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
-            >
-              {importing ? (
-                <LoaderCircle size={13} className="media-spin" />
-              ) : (
-                <Plus size={13} />
-              )}{" "}
-              {importing ? t("media.importing") : t("media.import")}
-            </button>
-            <button
-              className="media-import media-import-arrow"
-              style={{
-                padding: "0 6px",
-                borderTopLeftRadius: 0,
-                borderBottomLeftRadius: 0,
-                borderLeft: "1px solid rgba(255,255,255,0.15)",
-              }}
-              onClick={() => setImportMenuOpen(!importMenuOpen)}
-              title="Import Options"
-              aria-label="Import Options"
-            >
-              <ChevronDown size={12} />
-            </button>
-            {importMenuOpen && (
-              <div
-                className="media-import-dropdown"
-                style={{
-                  position: "absolute",
-                  top: "100%",
-                  right: 0,
-                  marginTop: "4px",
-                  background: "#1c1c22",
-                  border: "1px solid #333",
-                  borderRadius: "6px",
-                  padding: "4px",
-                  zIndex: 60,
-                  boxShadow: "0 6px 18px rgba(0,0,0,0.6)",
-                  display: "flex",
-                  flexDirection: "column",
-                  minWidth: "140px",
-                  gap: "2px",
-                }}
-              >
-                <button
-                  className="media-import-menu-item"
-                  onClick={() => {
-                    setImportMenuOpen(false);
-                    startImport();
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    padding: "6px 10px",
-                    background: "transparent",
-                    border: "none",
-                    color: "#ddd",
-                    fontSize: "12px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    borderRadius: "4px",
-                  }}
-                >
-                  <Plus size={13} /> {t("media.importFiles")}
-                </button>
-                <button
-                  className="media-import-menu-item"
-                  onClick={() => {
-                    setImportMenuOpen(false);
-                    onImportFolder?.();
-                  }}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    padding: "6px 10px",
-                    background: "transparent",
-                    border: "none",
-                    color: "#ddd",
-                    fontSize: "12px",
-                    cursor: "pointer",
-                    textAlign: "left",
-                    borderRadius: "4px",
-                  }}
-                >
-                  <FolderPlus size={13} /> {t("media.importFolder")}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-      {showColorPicker && (
-        <div
-          className="media-color-popover"
-          style={{
-            position: "absolute",
-            top: "44px",
-            right: "12px",
-            background: "#222",
-            border: "1px solid #444",
-            borderRadius: "8px",
-            padding: "10px",
-            zIndex: 50,
-            boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "8px",
-            width: "200px",
-          }}
-        >
-          <strong style={{ fontSize: "11px", color: "#ccc" }}>Solid Color (Color Matte)</strong>
-          <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
-            {[
-              { color: "#000000", name: "Black" },
-              { color: "#ffffff", name: "White" },
-              { color: "#00ff00", name: "Green Screen" },
-              { color: "#0078d7", name: "Blue" },
-              { color: "#e11d48", name: "Red" },
-              { color: "#7c3aed", name: "Purple" },
-            ].map((p) => (
-              <button
-                key={p.color}
-                title={p.name}
-                style={{
-                  width: "24px",
-                  height: "24px",
-                  borderRadius: "4px",
-                  background: p.color,
-                  border: "1px solid #555",
-                  cursor: "pointer",
-                }}
-                onClick={() => addSolid(p.color, p.name)}
-              />
-            ))}
-          </div>
-          <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "4px" }}>
-            <input
-              type="color"
-              value={customColor}
-              onChange={(e) => setCustomColor(e.target.value)}
-              style={{ width: "32px", height: "24px", padding: 0, border: "0", cursor: "pointer", borderRadius: "4px" }}
-            />
-            <button
-              className="media-import"
-              style={{ flex: 1, padding: "4px 8px", fontSize: "11px" }}
-              onClick={() => addSolid(customColor, `Solid ${customColor}`)}
-            >
-              Add Custom
-            </button>
-          </div>
-        </div>
-      )}
-      <div className="media-folder-bar">
-        <button
-          className={`media-folder-pill ${activeFolder === null ? "is-active" : ""}`}
-          onClick={() => setActiveFolder(null)}
-          title={t("media.allMedia")}
-        >
-          <FolderOpen size={12} />
-          <span>{t("media.allMedia")}</span>
-          <span className="media-folder-badge">{project.assets.length}</span>
-        </button>
-        {folders.map((f) => (
-          <div key={f.path} className="media-folder-pill-group">
-            <button
-              className={`media-folder-pill ${activeFolder === f.path ? "is-active" : ""}`}
-              onClick={() => setActiveFolder(f.path)}
-              draggable
-              onDragStart={(e) => {
-                e.dataTransfer.setData("application/x-gocut-folder", f.path);
-              }}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                const assetId = e.dataTransfer.getData(ASSET_DRAG_TYPE);
-                if (assetId) {
-                  useEditorStore.getState().moveAssetToFolder(assetId, f.path);
-                }
-              }}
-              title={f.path}
-            >
-              <Folder size={12} />
-              <span>{f.name}</span>
-              <span className="media-folder-badge">{f.count}</span>
-            </button>
-            <button
-              className="media-folder-add-btn"
-              title={t("media.addAllToTimeline")}
-              aria-label={`${t("media.addAllToTimeline")} ${f.name}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                useEditorStore.getState().addFolderToTimeline(f.path, "append");
-              }}
-            >
-              <Plus size={11} />
-            </button>
-            <button
-              className="media-folder-more-btn"
-              title="Folder options"
-              aria-label={`Options for ${f.name}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setEditingFolder(editingFolder === f.path ? null : f.path);
-              }}
-            >
-              <MoreHorizontal size={11} />
-            </button>
-            {editingFolder === f.path && (
-              <div className="media-folder-menu" onClick={(e) => e.stopPropagation()}>
-                <button
-                  onClick={() => {
-                    const promptName = window.prompt(t("media.renameFolder"), f.name);
-                    if (promptName && promptName.trim() && promptName.trim() !== f.name) {
-                      useEditorStore.getState().renameFolder(f.path, promptName.trim());
-                    }
-                    setEditingFolder(null);
-                  }}
-                >
-                  {t("media.renameFolder")}
-                </button>
-                <button
-                  className="is-danger"
-                  onClick={() => {
-                    if (window.confirm(`${t("media.deleteFolder")} "${f.name}"?`)) {
-                      useEditorStore.getState().deleteFolder(f.path);
-                      if (activeFolder === f.path) setActiveFolder(null);
-                    }
-                    setEditingFolder(null);
-                  }}
-                >
-                  {t("media.deleteFolder")}
-                </button>
-              </div>
-            )}
-          </div>
-        ))}
-        <button
-          className="media-folder-new-btn"
-          title={t("media.newFolder") || "New Folder"}
-          onClick={() => {
-            const name = window.prompt(t("media.newFolder") || "New Folder", "New Folder");
-            if (name && name.trim()) {
-              useEditorStore.getState().createFolder(name.trim());
-            }
-          }}
-        >
-          <FolderPlus size={12} />
-        </button>
-      </div>
-      <div className="media-tools">
-        <div className="media-search">
-          <Search size={13} />
-          <input
-            aria-label={t("media.searchPlaceholder")}
-            placeholder={t("media.searchPlaceholder")}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          {query && (
-            <button aria-label={t("media.clearSearch")} onClick={() => setQuery("")}>
-              <X size={12} />
-            </button>
-          )}
-        </div>
-        <div className="media-view">
-          <button
-            title={t("media.gridView")}
-            aria-label={t("media.gridView")}
-            className={view === "grid" ? "is-active" : ""}
-            onClick={() => setView("grid")}
-          >
-            <Grid2X2 size={14} />
-          </button>
-          <button
-            title={t("media.listView")}
-            aria-label={t("media.listView")}
-            className={view === "list" ? "is-active" : ""}
-            onClick={() => setView("list")}
-          >
-            <List size={15} />
-          </button>
-        </div>
-      </div>
       <div className="media-filters" role="tablist" aria-label={t("media.title")}>
         {(["all", "video", "audio", "image"] as const).map((value) => (
           <button
@@ -710,52 +417,372 @@ export default function MediaLibrary({
           </button>
         ))}
       </div>
-      <div
-        className={`media-content media-${view}`}
-        onClick={(event) => {
-          if (event.target === event.currentTarget) {
-            setMenu(null);
-            setSelected(null);
-          }
-        }}
-      >
-        {filtered.length > 0 ? (
-          filtered.map(item)
-        ) : project.assets.length > 0 ? (
-          <div className="media-empty">
-            <Search size={26} />
-            <strong>{t("media.noMatchTitle")}</strong>
-            <p>{t("media.noMatchDesc")}</p>
-            <button
-              onClick={() => {
-                setQuery("");
-                setKind("all");
-              }}
-            >
-              {t("media.viewAll")}
-            </button>
+      <div className="media-main">
+        <div className="media-top">
+          <div className="media-top-title">
+            <FolderOpen size={15} />
+            <span>{t("media.projectMedia")}</span>
+            <b>{project.assets.length}</b>
           </div>
-        ) : (
-          <div className="media-empty">
-            <div className="media-empty-illustration">
-              <Film size={31} />
-              <Music2 size={18} />
-              <FileImage size={19} />
-            </div>
-            <strong>{t("media.emptyInspiration")}</strong>
-            <p style={{ whiteSpace: "pre-line" }}>
-              {t("media.emptyDesc")}
-            </p>
+          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
             <button
-              className="media-empty-import"
-              onClick={startImport}
-              disabled={importing}
+              className="media-import"
+              style={{ padding: "0 8px" }}
+              title="Create Solid Color (Color Matte)"
+              aria-label="Create Solid Color"
+              onClick={() => setShowColorPicker(!showColorPicker)}
             >
-              <Upload size={13} /> {importing ? t("media.importing") : t("media.import")}
+              <Palette size={13} />
             </button>
-            <span>{t("media.importHint")}</span>
+            <div className="media-import-split" style={{ position: "relative", display: "inline-flex" }}>
+              <button
+                className="media-import"
+                onClick={startImport}
+                disabled={importing}
+                style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
+              >
+                {importing ? (
+                  <LoaderCircle size={13} className="media-spin" />
+                ) : (
+                  <Plus size={13} />
+                )}{" "}
+                {importing ? t("media.importing") : t("media.import")}
+              </button>
+              <button
+                className="media-import media-import-arrow"
+                style={{
+                  padding: "0 6px",
+                  borderTopLeftRadius: 0,
+                  borderBottomLeftRadius: 0,
+                  borderLeft: "1px solid rgba(255,255,255,0.15)",
+                }}
+                onClick={() => setImportMenuOpen(!importMenuOpen)}
+                title="Import Options"
+                aria-label="Import Options"
+              >
+                <ChevronDown size={12} />
+              </button>
+              {importMenuOpen && (
+                <div className="media-import-dropdown">
+                  <button
+                    className="media-import-menu-item"
+                    onClick={() => {
+                      setImportMenuOpen(false);
+                      startImport();
+                    }}
+                  >
+                    <span className="file-menu-icon"><Plus size={14} /></span>
+                    <span className="file-menu-label">{t("media.importFiles")}</span>
+                  </button>
+                  <button
+                    className="media-import-menu-item"
+                    onClick={() => {
+                      setImportMenuOpen(false);
+                      onImportFolder?.();
+                    }}
+                  >
+                    <span className="file-menu-icon"><FolderPlus size={14} /></span>
+                    <span className="file-menu-label">{t("media.importFolder")}</span>
+                  </button>
+                  <button
+                    className="media-import-menu-item"
+                    onClick={() => {
+                      setImportMenuOpen(false);
+                      const name = window.prompt(t("media.newFolder") || "New Folder", "New Folder");
+                      if (name && name.trim()) {
+                        useEditorStore.getState().createFolder(name.trim());
+                      }
+                    }}
+                  >
+                    <span className="file-menu-icon"><FolderPlus size={14} /></span>
+                    <span className="file-menu-label">{t("media.newFolder") || "New Folder"}</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        {showColorPicker && (
+          <div
+            className="media-color-popover"
+            style={{
+              position: "absolute",
+              top: "44px",
+              right: "12px",
+              background: "#222",
+              border: "1px solid #444",
+              borderRadius: "8px",
+              padding: "10px",
+              zIndex: 50,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.6)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+              width: "200px",
+            }}
+          >
+            <strong style={{ fontSize: "11px", color: "#ccc" }}>Solid Color (Color Matte)</strong>
+            <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
+              {[
+                { color: "#000000", name: "Black" },
+                { color: "#ffffff", name: "White" },
+                { color: "#00ff00", name: "Green Screen" },
+                { color: "#0078d7", name: "Blue" },
+                { color: "#e11d48", name: "Red" },
+                { color: "#7c3aed", name: "Purple" },
+              ].map((p) => (
+                <button
+                  key={p.color}
+                  title={p.name}
+                  style={{
+                    width: "24px",
+                    height: "24px",
+                    borderRadius: "4px",
+                    background: p.color,
+                    border: "1px solid #555",
+                    cursor: "pointer",
+                  }}
+                  onClick={() => addSolid(p.color, p.name)}
+                />
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "4px" }}>
+              <input
+                type="color"
+                value={customColor}
+                onChange={(e) => setCustomColor(e.target.value)}
+                style={{ width: "32px", height: "24px", padding: 0, border: "0", cursor: "pointer", borderRadius: "4px" }}
+              />
+              <button
+                className="media-import"
+                style={{ flex: 1, padding: "4px 8px", fontSize: "11px" }}
+                onClick={() => addSolid(customColor, `Solid ${customColor}`)}
+              >
+                Add Custom
+              </button>
+            </div>
           </div>
         )}
+        {folders.length > 0 && (
+          <div className="media-folder-bar">
+            <button
+              className={`media-folder-pill ${activeFolder === null ? "is-active" : ""}`}
+              onClick={() => setActiveFolder(null)}
+              title={t("media.allMedia")}
+            >
+              <FolderOpen size={12} />
+              <span>{t("media.allMedia")}</span>
+              <span className="media-folder-badge">{project.assets.length}</span>
+            </button>
+            {folders.map((f) => (
+              <div key={f.path} className="media-folder-pill-group">
+                <button
+                  className={`media-folder-pill ${activeFolder === f.path ? "is-active" : ""}`}
+                  onClick={() => setActiveFolder(f.path)}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("application/x-gocut-folder", f.path);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const assetId = e.dataTransfer.getData(ASSET_DRAG_TYPE);
+                    if (assetId) {
+                      useEditorStore.getState().moveAssetToFolder(assetId, f.path);
+                    }
+                  }}
+                  title={f.path}
+                >
+                  <Folder size={12} />
+                  <span>{f.name}</span>
+                  <span className="media-folder-badge">{f.count}</span>
+                </button>
+                <button
+                  className="media-folder-add-btn"
+                  title={t("media.addAllToTimeline")}
+                  aria-label={`${t("media.addAllToTimeline")} ${f.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    useEditorStore.getState().addFolderToTimeline(f.path, "append");
+                  }}
+                >
+                  <Plus size={11} />
+                </button>
+                <button
+                  className="media-folder-more-btn"
+                  title="Folder options"
+                  aria-label={`Options for ${f.name}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEditingFolder(editingFolder === f.path ? null : f.path);
+                  }}
+                >
+                  <MoreHorizontal size={11} />
+                </button>
+                {editingFolder === f.path && (
+                  <div className="media-folder-menu" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      onClick={() => {
+                        const promptName = window.prompt(t("media.renameFolder"), f.name);
+                        if (promptName && promptName.trim() && promptName.trim() !== f.name) {
+                          useEditorStore.getState().renameFolder(f.path, promptName.trim());
+                        }
+                        setEditingFolder(null);
+                      }}
+                    >
+                      <span className="file-menu-icon"><Pencil size={14} /></span>
+                      <span className="file-menu-label">{t("media.renameFolder")}</span>
+                    </button>
+                    <button
+                      className="is-danger"
+                      onClick={() => {
+                        if (window.confirm(`${t("media.deleteFolder")} "${f.name}"?`)) {
+                          useEditorStore.getState().deleteFolder(f.path);
+                          if (activeFolder === f.path) setActiveFolder(null);
+                        }
+                        setEditingFolder(null);
+                      }}
+                    >
+                      <span className="file-menu-icon"><Trash2 size={14} /></span>
+                      <span className="file-menu-label">{t("media.deleteFolder")}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+            <button
+              className="media-folder-new-btn"
+              title={t("media.newFolder") || "New Folder"}
+              onClick={() => {
+                const name = window.prompt(t("media.newFolder") || "New Folder", "New Folder");
+                if (name && name.trim()) {
+                  useEditorStore.getState().createFolder(name.trim());
+                }
+              }}
+            >
+              <FolderPlus size={12} />
+            </button>
+          </div>
+        )}
+        <div className="media-tools">
+          <div className="media-search">
+            <Search size={13} />
+            <input
+              aria-label={t("media.searchPlaceholder")}
+              placeholder={t("media.searchPlaceholder")}
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {query && (
+              <button aria-label={t("media.clearSearch")} onClick={() => setQuery("")}>
+                <X size={12} />
+              </button>
+            )}
+          </div>
+          <div className="media-view">
+            <button
+              title={t("media.gridView")}
+              aria-label={t("media.gridView")}
+              className={view === "grid" ? "is-active" : ""}
+              onClick={() => setView("grid")}
+            >
+              <Grid2X2 size={14} />
+            </button>
+            <button
+              title={t("media.listView")}
+              aria-label={t("media.listView")}
+              className={view === "list" ? "is-active" : ""}
+              onClick={() => setView("list")}
+            >
+              <List size={15} />
+            </button>
+          </div>
+        </div>
+        {(importing || importingItems.length > 0) && (
+          <div className="media-import-progress-banner" role="status" aria-live="polite">
+            <div className="media-import-progress-top">
+              <LoaderCircle size={14} className="media-spin" style={{ color: "#22d3ee" }} />
+              <span>
+                {importingItems.length > 0
+                  ? `Mengimpor & menyiapkan ${importingItems.length} file media...`
+                  : "Mengimpor & menyiapkan media..."}
+              </span>
+            </div>
+            <div className="media-import-progress-track">
+              <div className="media-import-progress-bar" />
+            </div>
+          </div>
+        )}
+        <div
+          className={`media-content media-${view}`}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setMenu(null);
+              setSelected(null);
+            }
+          }}
+        >
+          {(importing || importingItems.length > 0) &&
+            (importingItems.length > 0
+              ? importingItems
+              : [{ id: "skeleton-default", name: "Memproses media..." }]
+            ).map((sk) => (
+              <div key={sk.id} className="media-item media-item-skeleton" aria-busy="true">
+                <div className="media-preview media-preview-skeleton">
+                  <LoaderCircle size={22} className="media-spin" style={{ color: "#22d3ee" }} />
+                  <span className="media-skeleton-badge">MEMPROSES</span>
+                </div>
+                <div className="media-info">
+                  <span className="media-name" title={sk.name}>
+                    {sk.name}
+                  </span>
+                  <span className="media-metadata" style={{ color: "#22d3ee" }}>
+                    Menyiapkan pratinjau...
+                  </span>
+                </div>
+              </div>
+            ))}
+          {filtered.length > 0 ? (
+            filtered.map(item)
+          ) : importing || importingItems.length > 0 ? null : project.assets.length > 0 ? (
+            <div className="media-empty">
+              <Search size={26} />
+              <strong>{t("media.noMatchTitle")}</strong>
+              <p>{t("media.noMatchDesc")}</p>
+              <button
+                onClick={() => {
+                  setQuery("");
+                  setKind("all");
+                }}
+              >
+                {t("media.viewAll")}
+              </button>
+            </div>
+          ) : (
+            <div className="media-empty">
+              <div className="media-empty-illustration">
+                <Film size={31} />
+                <Music2 size={18} />
+                <FileImage size={19} />
+              </div>
+              <strong>{t("media.emptyInspiration")}</strong>
+              <p style={{ whiteSpace: "pre-line" }}>
+                {t("media.emptyDesc")}
+              </p>
+              <button
+                className="media-empty-import"
+                onClick={startImport}
+                disabled={importing}
+              >
+                <Upload size={13} /> {importing ? t("media.importing") : t("media.import")}
+              </button>
+              <span>{t("media.importHint")}</span>
+            </div>
+          )}
+        </div>
       </div>
       <div className="media-footer">
         <span>{filtered.length} {t("speech.assets")}</span>

@@ -59,33 +59,34 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
         </div>
       </div>
 
-      <div className="inspector-content" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+      <div className="inspector-content" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
         {/* Selected Transition Overview */}
         <div className="transition-active-card" style={{
-          background: '#161920',
-          border: '1px solid rgba(255, 255, 255, 0.12)',
+          background: '#18181b',
+          border: '1px solid #27272a',
           borderRadius: '6px',
-          padding: '12px',
+          padding: '10px 12px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
         }}>
           <div>
-            <div style={{ fontSize: '14px', fontWeight: 600, color: '#f8fafc' }}>
+            <div style={{ fontSize: '13px', fontWeight: 600, color: '#f4f4f5' }}>
               {currentPreset?.name ?? transition.type}
             </div>
-            <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '2px' }}>
+            <div style={{ fontSize: '11px', color: '#a1a1aa', marginTop: '2px' }}>
               {currentPreset?.description ?? 'Efek perpindahan visual antar klip'}
             </div>
           </div>
           <div style={{
-            background: 'var(--accent-soft, rgba(99, 59, 251, 0.15))',
-            border: '1px solid var(--accent-border, rgba(99, 59, 251, 0.45))',
+            background: 'rgba(99, 59, 251, 0.15)',
+            border: '1px solid rgba(99, 59, 251, 0.4)',
             borderRadius: '4px',
-            padding: '3px 8px',
+            padding: '2px 8px',
             fontSize: '11px',
             fontWeight: 600,
-            color: 'var(--accent-light, #9d7dfd)',
+            color: '#a78bfa',
+            fontFamily: 'ui-monospace, SFMono-Regular, monospace',
           }}>
             {transition.duration.toFixed(2)}s
           </div>
@@ -93,13 +94,14 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
 
         {/* Duration Slider and Numerical Input */}
         <div className="transition-duration-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <label style={{ fontSize: '12px', fontWeight: 600, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Clock size={14} />
+          <div className="section-title" style={{ marginBottom: '8px' }}>
+            <h3 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Clock size={13} />
               Durasi Transisi
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            </h3>
+            <div className="numeric-field" style={{ width: '64px', minWidth: '64px' }}>
               <input
+                aria-label="Durasi Transisi"
                 type="number"
                 min="0.1"
                 max={maxSafeDuration}
@@ -111,49 +113,31 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
                     resizeTransitionRecord(transition.id, val);
                   }
                 }}
-                style={{
-                  width: '64px',
-                  background: '#1e293b',
-                  border: '1px solid #475569',
-                  borderRadius: '4px',
-                  color: '#fff',
-                  padding: '2px 6px',
-                  fontSize: '12px',
-                  textAlign: 'right',
-                }}
               />
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>detik</span>
+              <span className="numeric-suffix">s</span>
             </div>
           </div>
 
           <input
+            className="property-range"
+            aria-label="Durasi Slider"
             type="range"
             min="0.1"
             max={maxSafeDuration}
             step="0.05"
             value={transition.duration}
             onChange={(e) => resizeTransitionRecord(transition.id, parseFloat(e.target.value))}
-            style={{ width: '100%', accentColor: '#633bfb', cursor: 'pointer' }}
+            style={{ width: '100%', marginBottom: '10px' }}
           />
 
           {/* Quick preset buttons */}
-          <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+          <div className="speed-presets" style={{ marginTop: '8px' }}>
             {[0.3, 0.5, 0.8, 1.0, 1.5].filter((d) => d <= maxSafeDuration).map((dur) => (
               <button
                 key={dur}
+                type="button"
+                className={`speed-preset-btn ${Math.abs(transition.duration - dur) < 0.04 ? 'is-active' : ''}`}
                 onClick={() => resizeTransitionRecord(transition.id, dur)}
-                style={{
-                  flex: 1,
-                  padding: '4px 0',
-                  fontSize: '11px',
-                  background: Math.abs(transition.duration - dur) < 0.04 ? '#633bfb' : '#1e2530',
-                  color: Math.abs(transition.duration - dur) < 0.04 ? '#ffffff' : '#94a3b8',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontWeight: 500,
-                  transition: 'all 0.15s ease',
-                }}
               >
                 {dur}s
               </button>
@@ -162,25 +146,11 @@ export default function TransitionInspector({ transitionId }: TransitionInspecto
         </div>
 
         {/* Apply to All Footer Button */}
-        <div style={{ marginTop: 'auto', paddingTop: '16px', borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}>
+        <div style={{ marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid #27272a' }}>
           <button
+            type="button"
             onClick={handleApplyToAll}
-            style={{
-              width: '100%',
-              padding: '9px 12px',
-              background: '#633bfb',
-              border: 'none',
-              borderRadius: '6px',
-              color: '#ffffff',
-              fontSize: '12px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '6px',
-              transition: 'background 0.15s',
-            }}
+            className="inspector-effects-link-btn"
           >
             <SlidersHorizontal size={14} />
             Terapkan ke Semua Sambungan

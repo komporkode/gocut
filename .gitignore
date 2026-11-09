@@ -34,3 +34,4 @@ VULTURE_AUDIT.md
 build/bin/
 bugraph/
 *.exe
+data/

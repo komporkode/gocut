@@ -17,8 +17,13 @@ import {
   HardDrive,
   Home,
   Info,
+  FileDown,
+  FolderSync,
   Keyboard,
+  Layout,
   LoaderCircle,
+  Package,
+  RotateCcw,
   Monitor,
   Music2,
   MessageSquare,
@@ -52,6 +57,9 @@ import type {
   Project,
   RecentProject,
   StorageInfo,
+  UpdateInfo,
+  UpdateProgress,
+  UpdateSettings,
   WhisperModel,
 } from "./core/types";
 import { detachLinkedAudio } from "./core/timelineEdits";
@@ -73,12 +81,13 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import EffectsPanel from "./components/EffectsPanel";
 import { TextLibrary, TransitionLibrary } from "./components/CreativeLibrary";
 import { addTextPreset, applyTransition, type TextPreset, type TransitionId } from "./core/creativePresets";
+import { EXPORT_PLATFORM_PRESETS, type ExportPlatformPreset } from "./core/effectsEngine";
 import Player from "./components/Player";
 import Inspector from "./components/Inspector";
 import { toMediaStreamUrl, normalizeProjectAssets } from "./wails/wailsBridge";
 import { useTranslation, useLanguageStore, type Language, type TranslationKey } from "./i18n";
 import "./styles.css";
-type Modal = "reverse" | "freeze" | "package" | "export" | "settings" | "shortcuts" | "about" | "capcut" | null;
+type Modal = "reverse" | "freeze" | "package" | "export" | "settings" | "shortcuts" | "about" | "capcut" | "update" | null;
 type PendingCapcutImport = {
   selection: CapcutImportSelection;
   capturedProject: Project;
@@ -153,7 +162,10 @@ function ExportDialog({
       fps: project.fps,
       quality: "standard",
       format: "mp4",
+      codec: "h264",
+      encoder: "auto",
     }),
+    [activePresetId, setActivePresetId] = useState<string>("youtube-1080p"),
     [progress, setProgress] = useState<ExportProgress | null>(null),
     [busy, setBusy] = useState(false),
     [error, setError] = useState("");
@@ -326,6 +338,50 @@ function ExportDialog({
         : `${(estimatedMb / 1024).toFixed(2)} GB`;
 
   const status = progress?.status;
+  const applyExportPreset = (preset: ExportPlatformPreset) => {
+    setActivePresetId(preset.id);
+    if (preset.resolutionHeight) {
+      let width = origWidth;
+      let height = origHeight;
+      if (isVertical) {
+        width = preset.resolutionHeight;
+        height =
+          Math.round(
+            ((preset.resolutionHeight * (project.height || 1080)) /
+              (project.width || 1920)) /
+              2,
+          ) * 2;
+      } else {
+        height = preset.resolutionHeight;
+        width =
+          Math.round(
+            ((preset.resolutionHeight * (project.width || 1920)) /
+              (project.height || 1080)) /
+              2,
+          ) * 2;
+      }
+      setOptions((p) => ({
+        ...p,
+        width,
+        height,
+        fps: preset.fps ?? p.fps,
+        quality: preset.quality,
+        format: preset.format,
+        codec: preset.codec,
+        path: "",
+      }));
+    } else {
+      setOptions((p) => ({
+        ...p,
+        fps: preset.fps ?? p.fps,
+        quality: preset.quality,
+        format: preset.format,
+        codec: preset.codec,
+        path: "",
+      }));
+    }
+    setBitrateMode(preset.bitrate);
+  };
   return (
     <ModalShell
       title={t("export.title")}
@@ -346,6 +402,23 @@ function ExportDialog({
         <span className="export-badge">{t("export.localRender")}</span>
       </div>
       <div className="modal-body">
+        <div className="export-preset-strip" aria-label="Preset Platform">
+          {EXPORT_PLATFORM_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              disabled={exporting}
+              className={`export-preset-pill ${activePresetId === preset.id ? "is-active" : ""}`}
+              onClick={() => applyExportPreset(preset)}
+            >
+              <div className="export-preset-pill-top">
+                <span className="export-preset-pill-badge">{preset.badge}</span>
+                <strong>{preset.name}</strong>
+              </div>
+              <small>{preset.description}</small>
+            </button>
+          ))}
+        </div>
         <label className="stacked-label">
           {t("export.location")}
           <div className="file-picker">
@@ -474,8 +547,27 @@ function ExportDialog({
                 }));
               }}
             >
-              <option value="mp4">MP4 · H.264 / AAC</option>
-              <option value="mov">MOV · H.264 / AAC</option>
+              <option value="mp4">MP4 · Video (H.264 / HEVC)</option>
+              <option value="mov">MOV · QuickTime</option>
+              <option value="mp3">MP3 · Audio Only (192 kbps)</option>
+              <option value="wav">WAV · Audio Lossless (PCM)</option>
+            </select>
+          </label>
+          <label>
+            Video Codec
+            <select
+              aria-label="Video Codec"
+              disabled={exporting || options.format === "mp3" || options.format === "wav"}
+              value={options.codec || "h264"}
+              onChange={(e) =>
+                setOptions((p) => ({
+                  ...p,
+                  codec: e.target.value as "h264" | "hevc",
+                }))
+              }
+            >
+              <option value="h264">H.264 (AVC · Kompatibilitas Luas)</option>
+              <option value="hevc">H.265 (HEVC · Hemat 40% Ukuran)</option>
             </select>
           </label>
           <label>
@@ -487,13 +579,16 @@ function ExportDialog({
               onChange={(e) =>
                 setOptions((p) => ({
                   ...p,
-                  encoder: e.target.value as "auto" | "gpu" | "cpu",
+                  encoder: e.target.value as ExportOptions["encoder"],
                 }))
               }
             >
-              <option value="auto">Auto (GPU Hardware / CPU)</option>
-              <option value="gpu">Hardware GPU (MFT / NVENC / QSV)</option>
-              <option value="cpu">Software CPU (libx264)</option>
+              <option value="auto">Auto (Deteksi GPU NVENC / QSV / AMF)</option>
+              <option value="nvenc">NVIDIA NVENC Hardware</option>
+              <option value="qsv">Intel QuickSync (QSV) Hardware</option>
+              <option value="amf">AMD AMF Hardware</option>
+              <option value="gpu">Hardware GPU (MediaFoundation / Auto)</option>
+              <option value="cpu">Software CPU (libx264 / libx265)</option>
             </select>
           </label>
         </div>
@@ -583,22 +678,30 @@ function ExportDialog({
     </ModalShell>
   );
 }
-async function browserAssets(files: File[]): Promise<MediaAsset[]> {
+async function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const commaIdx = result.indexOf(",");
+      resolve(commaIdx >= 0 ? result.slice(commaIdx + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function browserAssets(
+  files: File[],
+  onFileComplete?: (fileName: string, asset: MediaAsset) => void,
+): Promise<MediaAsset[]> {
   const results: MediaAsset[] = [];
   for (const file of files) {
     let diskPath = file.name;
     const w = window as unknown as { go?: { main?: { App?: { SaveMediaCache?: (name: string, b64: string) => Promise<string> } } } };
     if (w.go?.main?.App?.SaveMediaCache) {
       try {
-        const buffer = await file.arrayBuffer();
-        let binary = "";
-        const bytes = new Uint8Array(buffer);
-        const len = bytes.byteLength;
-        const chunkSize = 0x8000;
-        for (let i = 0; i < len; i += chunkSize) {
-          binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)));
-        }
-        const b64 = btoa(binary);
+        const b64 = await readFileAsBase64(file);
         const saved = await w.go.main.App.SaveMediaCache(file.name, b64);
         if (saved) {
           diskPath = saved;
@@ -614,6 +717,7 @@ async function browserAssets(files: File[]): Promise<MediaAsset[]> {
       : file.type.startsWith("audio/")
         ? "audio"
         : "video";
+    let builtAsset: MediaAsset;
     if (kind === "image") {
       const image = new Image();
       image.src = url;
@@ -621,7 +725,7 @@ async function browserAssets(files: File[]): Promise<MediaAsset[]> {
         image.onload = () => resolve();
         image.onerror = () => reject(new Error(`Failed to read image: ${file.name}`));
       });
-      results.push({
+      builtAsset = {
         id: id(),
         name: file.name,
         path: diskPath,
@@ -633,7 +737,7 @@ async function browserAssets(files: File[]): Promise<MediaAsset[]> {
         fps: 0,
         hasAudio: false,
         thumbnail: url,
-      });
+      };
     } else {
       const element = document.createElement(kind);
       element.preload = "metadata";
@@ -650,7 +754,7 @@ async function browserAssets(files: File[]): Promise<MediaAsset[]> {
           if (cap) thumb = cap;
         } catch {}
       }
-      results.push({
+      builtAsset = {
         id: id(),
         name: file.name,
         path: diskPath,
@@ -662,10 +766,12 @@ async function browserAssets(files: File[]): Promise<MediaAsset[]> {
         fps: 30,
         thumbnail: thumb,
         hasAudio: true,
-      });
+      };
       element.removeAttribute("src");
       element.load();
     }
+    results.push(builtAsset);
+    onFileComplete?.(file.name, builtAsset);
   }
   return results;
 }
@@ -721,6 +827,7 @@ export default function App() {
     [fileMenu, setFileMenu] = useState(false),
     [toast, setToast] = useState(""),
     [importing, setImporting] = useState(false),
+    [importingItems, setImportingItems] = useState<Array<{ id: string; name: string }>>([]),
     [system, setSystem] = useState<{
       ffmpeg: boolean;
       version?: string;
@@ -733,7 +840,112 @@ export default function App() {
     [whisperModels, setWhisperModels] = useState<WhisperModel[]>([]),
     [targetDrive, setTargetDrive] = useState("D:"),
     [isRelocating, setIsRelocating] = useState(false),
-    [initialized, setInitialized] = useState(false);
+    [initialized, setInitialized] = useState(false),
+    [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null),
+    [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null),
+    [updateSettings, setUpdateSettings] = useState<UpdateSettings>({ autoCheck: true, lastChecked: 0 }),
+    [checkingUpdate, setCheckingUpdate] = useState(false),
+    [updateCheckStatus, setUpdateCheckStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!window.editorAPI) return;
+    window.editorAPI.getUpdateSettings?.().then((settings) => {
+      if (settings) setUpdateSettings(settings);
+    });
+    const unregAvail = window.editorAPI.onUpdateAvailable?.((info) => {
+      if (info?.available) {
+        setUpdateInfo(info);
+      }
+    });
+    const unregProg = window.editorAPI.onUpdateProgress?.((prog) => {
+      setUpdateProgress(prog);
+    });
+    return () => {
+      unregAvail?.();
+      unregProg?.();
+    };
+  }, []);
+
+  const handleToggleAutoCheck = async (enabled: boolean) => {
+    setUpdateSettings((prev) => ({ ...prev, autoCheck: enabled }));
+    if (window.editorAPI?.setUpdateSettings) {
+      await window.editorAPI.setUpdateSettings({ autoCheck: enabled });
+    }
+  };
+
+  const handleCheckUpdate = async () => {
+    if (!window.editorAPI?.checkForUpdate) return;
+    setCheckingUpdate(true);
+    setUpdateCheckStatus(null);
+    try {
+      const res = await window.editorAPI.checkForUpdate(true);
+      if (res && res.available) {
+        setUpdateInfo(res);
+        setModal("update");
+      } else {
+        setUpdateCheckStatus(t("settings.update.upToDate"));
+      }
+      if (window.editorAPI.getUpdateSettings) {
+        const s = await window.editorAPI.getUpdateSettings();
+        if (s) setUpdateSettings(s);
+      }
+    } catch (e) {
+      setUpdateCheckStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handleDownloadUpdate = async () => {
+    if (!updateInfo?.downloadUrl || !window.editorAPI?.downloadUpdate) return;
+    setUpdateProgress({
+      downloadedBytes: 0,
+      totalBytes: updateInfo.assetSize || 0,
+      percentage: 0,
+      status: "downloading",
+    });
+    try {
+      const path = await window.editorAPI.downloadUpdate(updateInfo.downloadUrl);
+      if (path) {
+        setUpdateProgress((prev) => ({
+          downloadedBytes: prev?.totalBytes || 1,
+          totalBytes: prev?.totalBytes || 1,
+          percentage: 100,
+          status: "completed",
+          installerPath: path,
+        }));
+      }
+    } catch (e) {
+      setUpdateProgress((prev) => ({
+        downloadedBytes: prev?.downloadedBytes || 0,
+        totalBytes: prev?.totalBytes || 0,
+        percentage: 0,
+        status: "error",
+        error: e instanceof Error ? e.message : String(e),
+      }));
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (!updateProgress?.installerPath || !window.editorAPI?.installUpdate) return;
+    try {
+      const state = useEditorStore.getState();
+      if (state.dirty) {
+        try {
+          await window.editorAPI.autosaveProject?.(state.project);
+        } catch {}
+        if (state.path && window.editorAPI?.saveProject) {
+          try {
+            await window.editorAPI.saveProject(state.project, state.path);
+            state.markSaved(state.path);
+          } catch {}
+        }
+      }
+      await window.editorAPI.installUpdate(updateProgress.installerPath);
+    } catch (e) {
+      notify(`Gagal menjalankan instalasi: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
 
   useEffect(() => {
     if (modal === "settings" && window.editorAPI) {
@@ -893,10 +1105,9 @@ export default function App() {
           setInitialized(true);
           return;
         }
-        if (currentView === "editor") {
-          const autosave = await window.editorAPI.getAutosave();
-          if (autosave && (autosave.clips.length || autosave.assets.length))
-            setRecover(autosave);
+        const autosave = await window.editorAPI.getAutosave();
+        if (autosave && (autosave.clips.length || autosave.assets.length)) {
+          setRecover(autosave);
         }
       }
       setInitialized(true);
@@ -945,6 +1156,16 @@ export default function App() {
     }
     const projectId = useEditorStore.getState().project.id;
     setImporting(true);
+    if (paths && paths.length > 0) {
+      setImportingItems(
+        paths.map((p, idx) => ({
+          id: `imp-path-${idx}-${Date.now()}`,
+          name: p.split(/[\\/]/).pop() || p,
+        })),
+      );
+    } else {
+      setImportingItems([{ id: `imp-picker-${Date.now()}`, name: "Menyiapkan berkas media..." }]);
+    }
     try {
       const assets = await window.editorAPI.importMedia(paths);
       if (useEditorStore.getState().project.id !== projectId) {
@@ -956,6 +1177,7 @@ export default function App() {
       return assets;
     } finally {
       setImporting(false);
+      setImportingItems([]);
     }
   };
 
@@ -1030,9 +1252,7 @@ export default function App() {
   };
   const newProject = () => {
     if (confirmReplace()) {
-      setRecover(null);
-      s.setProject(createProject());
-      setCurrentView("editor");
+      void handleNewProject();
     }
   };
 
@@ -1061,17 +1281,22 @@ export default function App() {
     setRecover(null);
     if (window.editorAPI) {
       try {
-        const res = await window.editorAPI.openRecentProject(path);
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout opening project")), 5000)
+        );
+        const res = await Promise.race([
+          window.editorAPI.openRecentProject(path),
+          timeoutPromise,
+        ]);
         let projectToLoad = res.project;
 
-        // Automatically sync with autosaved state if autosave has newer or more clips for this project
+        // Only sync with autosaved state if autosave strictly belongs to this exact project ID
         try {
           const autosave = await window.editorAPI.getAutosave();
           if (
             autosave &&
-            (autosave.id === projectToLoad.id || autosave.name === projectToLoad.name || (!projectToLoad.clips?.length && (autosave.clips?.length || 0) > 0)) &&
-            (autosave.clips?.length ?? 0) >= (projectToLoad.clips?.length ?? 0) &&
-            ((autosave.clips?.length ?? 0) > 0 || (autosave.assets?.length ?? 0) > 0)
+            autosave.id === projectToLoad.id &&
+            (autosave.clips?.length ?? 0) > (projectToLoad.clips?.length ?? 0)
           ) {
             projectToLoad = autosave;
             await window.editorAPI.saveProject(projectToLoad, res.path);
@@ -1083,16 +1308,42 @@ export default function App() {
         return;
       } catch (err) {
         notify(`Gagal membuka proyek: ${formatProjectError(err)}`);
+        return;
       }
     }
-    setRecover(null);
-    s.setProject(createProject("Untitled Project"), path);
-    setCurrentView("editor");
   };
 
-  const handleNewProject = () => {
+  const handleNewProject = async (config?: { name: string; width: number; height: number; fps: number }) => {
     setRecover(null);
-    s.setProject(createProject());
+    const projectName = config?.name?.trim() || t("project.untitled") || "Proyek Tanpa Judul";
+    const freshProject = createProject(projectName, {
+      width: config?.width ?? 1920,
+      height: config?.height ?? 1080,
+      fps: config?.fps ?? 30,
+    });
+    let targetPath: string | undefined;
+    if (window.editorAPI?.createProject) {
+      try {
+        const timeoutPromise = new Promise<null>((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout creating project")), 3000)
+        );
+        const created = await Promise.race([
+          window.editorAPI.createProject(projectName),
+          timeoutPromise,
+        ]);
+        if (created?.path) {
+          targetPath = created.path;
+          await window.editorAPI.saveProject(freshProject, targetPath);
+        }
+        await window.editorAPI.autosaveProject?.(freshProject);
+        if (window.editorAPI.getRecentProjects) {
+          setRecent(await window.editorAPI.getRecentProjects());
+        }
+      } catch (err) {
+        console.warn("Backend createProject timed out or failed, continuing with local fresh project:", err);
+      }
+    }
+    s.setProject(freshProject, targetPath);
     setCurrentView("editor");
   };
 
@@ -1236,10 +1487,12 @@ export default function App() {
             state.redo();
             break;
           case "c":
-            state.copy();
+            if (e.altKey) state.copyClipAttributes();
+            else state.copy();
             break;
           case "v":
-            state.paste();
+            if (e.altKey) state.pasteClipAttributes();
+            else state.paste();
             break;
           case "a":
             state.select(state.project.clips.map((c) => c.id));
@@ -1301,6 +1554,10 @@ export default function App() {
           case "w":
           case "W":
             state.trimRightAtPlayhead();
+            break;
+          case "m":
+          case "M":
+            state.addMarker();
             break;
           case "j":
           case "J": {
@@ -1584,21 +1841,35 @@ export default function App() {
     }
 
     // 4. Otherwise, treat as media assets (images, videos, audio, or media folders)
+    // If currently on dashboard, immediately open a fresh editor workspace so the user sees the import skeleton live!
+    if (currentView === "dashboard") {
+      await handleNewProject();
+      setTab("media");
+    }
+
     let importedAssets: MediaAsset[] = [];
     if (paths.length > 0) {
       importedAssets = await importMedia(paths);
     } else if (files && files.length > 0) {
-      importedAssets = await browserAssets(files);
-      useEditorStore.getState().addAssets(importedAssets);
-      if (importedAssets.length > 0) {
-        notify(t("notify.mediaImported", { count: importedAssets.length }));
+      setImporting(true);
+      setImportingItems(
+        files.map((f, idx) => ({
+          id: `drop-file-${idx}-${Date.now()}`,
+          name: f.name,
+        })),
+      );
+      try {
+        importedAssets = await browserAssets(files, (doneName, asset) => {
+          useEditorStore.getState().addAssets([asset]);
+          setImportingItems((prev) => prev.filter((item) => item.name !== doneName));
+        });
+        if (importedAssets.length > 0) {
+          notify(t("notify.mediaImported", { count: importedAssets.length }));
+        }
+      } finally {
+        setImporting(false);
+        setImportingItems([]);
       }
-    }
-
-    // If currently on dashboard and media was imported, switch to editor so user sees their project!
-    if (importedAssets.length > 0 && currentView === "dashboard") {
-      setRecover(null);
-      setCurrentView("editor");
     }
 
     // If dropped onto timeline, add the assets to timeline at playhead
@@ -1615,12 +1886,49 @@ export default function App() {
 
   if (currentView === "dashboard") {
     return (
-      <ProjectDashboard
-        onOpenProject={(path) => void safe(() => handleOpenProject(path))}
-        onNewProject={handleNewProject}
-        onOpenExternalFile={() => void safe(open)}
-        onDropFiles={(files, paths) => void safe(() => handleDroppedPathsOrFiles(paths || [], files))}
-      />
+      <>
+        <ProjectDashboard
+          onOpenProject={(path) => void safe(() => handleOpenProject(path))}
+          onNewProject={handleNewProject}
+          onOpenExternalFile={() => void safe(open)}
+          onDropFiles={(files, paths) => void safe(() => handleDroppedPathsOrFiles(paths || [], files))}
+        />
+        {updateInfo?.available && (
+          <div
+            style={{
+              position: "fixed",
+              bottom: "20px",
+              right: "20px",
+              zIndex: 9999,
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              background: "rgba(18, 18, 24, 0.95)",
+              border: "1px solid rgba(6, 182, 212, 0.45)",
+              borderRadius: "10px",
+              padding: "10px 14px",
+              boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+              color: "#f4f4f5",
+              fontSize: "12px",
+            }}
+          >
+            <Sparkles size={15} style={{ color: "#22d3ee" }} />
+            <span>
+              Pembaruan <strong>v{updateInfo.latestVersion}</strong> tersedia!
+            </span>
+            <button
+              className="primary"
+              style={{ padding: "4px 10px", fontSize: "11px" }}
+              onClick={() => {
+                setCurrentView("editor");
+                setModal("update");
+              }}
+            >
+              Lihat Update
+            </button>
+          </div>
+        )}
+      </>
     );
   }
 
@@ -1670,57 +1978,85 @@ export default function App() {
             {fileMenu && (
               <div className="file-menu">
                 <button
+                  className="file-menu-item"
                   onClick={() => void safe(() => handleAction("back-home"))}
-                  style={{ color: "var(--accent-light, #9d7dfd)", fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}
+                  style={{ color: "var(--accent-light, #9d7dfd)", fontWeight: 600 }}
                 >
-                  <Home size={14} />
-                  <span>{t("menu.backToHome")}</span>
+                  <span className="file-menu-icon"><Home size={14} /></span>
+                  <span className="file-menu-label">{t("menu.backToHome")}</span>
                 </button>
                 <hr />
                 {[
-                  ["new", t("toolbar.newProject"), "⌘N"],
-                  ["open", t("toolbar.openProject"), "⌘O"],
-                  ["save", t("toolbar.saveProject"), "⌘S"],
-                  ["save-as", t("toolbar.saveAs"), "⇧⌘S"],
-                  ["import", t("toolbar.importMedia"), "⌘I"],
-                  ["export", t("toolbar.exportVideo"), "⌘E"],
-                ].map(([action, label, shortcut]) => (
+                  ["new", t("toolbar.newProject"), "⌘N", <FilePlus2 size={14} />],
+                  ["open", t("toolbar.openProject"), "⌘O", <FolderOpen size={14} />],
+                  ["save", t("toolbar.saveProject"), "⌘S", <Save size={14} />],
+                  ["save-as", t("toolbar.saveAs"), "⇧⌘S", <FileDown size={14} />],
+                  ["import", t("toolbar.importMedia"), "⌘I", <Upload size={14} />],
+                  ["export", t("toolbar.exportVideo"), "⌘E", <Download size={14} />],
+                ].map(([action, label, shortcut, icon]) => (
                   <button
-                    key={action}
-                    onClick={() => void safe(() => handleAction(action))}
+                    key={action as string}
+                    className="file-menu-item"
+                    onClick={() => void safe(() => handleAction(action as string))}
                   >
-                    {label}
-                    <kbd>{shortcut}</kbd>
+                    <span className="file-menu-icon">{icon as React.ReactNode}</span>
+                    <span className="file-menu-label">{label as string}</span>
+                    <kbd>{shortcut as string}</kbd>
                   </button>
                 ))}
                 <hr />
-                <button onClick={() => { setFileMenu(false); setModal("package"); }}>{t("toolbar.collectAssets")}</button>
-                <button onClick={() => void safe(() => importDraft("file"))}>
-                  {t("toolbar.importCapcutFile")}<span>{t("toolbar.experimental")}</span>
+                <button
+                  className="file-menu-item"
+                  onClick={() => { setFileMenu(false); setModal("package"); }}
+                >
+                  <span className="file-menu-icon"><Package size={14} /></span>
+                  <span className="file-menu-label">{t("toolbar.collectAssets")}</span>
                 </button>
-                <button onClick={() => void safe(() => importDraft("directory"))}>
-                  {t("toolbar.importCapcutFolder")}<span>{t("toolbar.experimental")}</span>
+                <button
+                  className="file-menu-item"
+                  onClick={() => void safe(() => importDraft("file"))}
+                >
+                  <span className="file-menu-icon"><Sparkles size={14} /></span>
+                  <span className="file-menu-label">{t("toolbar.importCapcutFile")}</span>
+                  <span className="file-menu-badge">{t("toolbar.experimental")}</span>
+                </button>
+                <button
+                  className="file-menu-item"
+                  onClick={() => void safe(() => importDraft("directory"))}
+                >
+                  <span className="file-menu-icon"><FolderSync size={14} /></span>
+                  <span className="file-menu-label">{t("toolbar.importCapcutFolder")}</span>
+                  <span className="file-menu-badge">{t("toolbar.experimental")}</span>
                 </button>
                 <hr />
                 <button
+                  className="file-menu-item"
                   onClick={() => {
                     setLayoutMode("classic");
                     try { localStorage.setItem("gocut-layout-mode", "classic"); } catch {}
                     setFileMenu(false);
                   }}
                 >
-                  <span>{layoutMode === "classic" ? "✓ " : "  "}{t("menu.layoutDefault")}</span>
+                  <span className="file-menu-icon">
+                    {layoutMode === "classic" ? <Check size={14} className="file-menu-check" /> : <Layout size={14} />}
+                  </span>
+                  <span className="file-menu-label">{t("menu.layoutDefault")}</span>
                 </button>
                 <button
+                  className="file-menu-item"
                   onClick={() => {
                     setLayoutMode("studio");
                     try { localStorage.setItem("gocut-layout-mode", "studio"); } catch {}
                     setFileMenu(false);
                   }}
                 >
-                  <span>{layoutMode === "studio" ? "✓ " : "  "}{t("menu.layoutVertical")}</span>
+                  <span className="file-menu-icon">
+                    {layoutMode === "studio" ? <Check size={14} className="file-menu-check" /> : <Columns3 size={14} />}
+                  </span>
+                  <span className="file-menu-label">{t("menu.layoutVertical")}</span>
                 </button>
                 <button
+                  className="file-menu-item"
                   onClick={() => {
                     try {
                       localStorage.removeItem("reacut-panel-widths-v1");
@@ -1731,11 +2067,24 @@ export default function App() {
                     notify(t("menu.resetLayout"));
                   }}
                 >
-                  <span>{t("menu.resetLayout")}</span>
+                  <span className="file-menu-icon"><RotateCcw size={14} /></span>
+                  <span className="file-menu-label">{t("menu.resetLayout")}</span>
                 </button>
                 <hr />
-                <button onClick={() => { setFileMenu(false); setModal("settings"); }}>{t("toolbar.settings")}</button>
-                <button onClick={() => { setFileMenu(false); setModal("shortcuts") }}>{t("toolbar.shortcuts")}</button>
+                <button
+                  className="file-menu-item"
+                  onClick={() => { setFileMenu(false); setModal("settings"); }}
+                >
+                  <span className="file-menu-icon"><Settings2 size={14} /></span>
+                  <span className="file-menu-label">{t("toolbar.settings")}</span>
+                </button>
+                <button
+                  className="file-menu-item"
+                  onClick={() => { setFileMenu(false); setModal("shortcuts"); }}
+                >
+                  <span className="file-menu-icon"><Keyboard size={14} /></span>
+                  <span className="file-menu-label">{t("toolbar.shortcuts")}</span>
+                </button>
               </div>
             )}
           </div>
@@ -1790,6 +2139,29 @@ export default function App() {
           >
             <Settings2 size={16} />
           </button>
+          {updateInfo?.available && (
+            <button
+              className="update-badge-btn"
+              title={`${t("settings.update.available")} (v${updateInfo.latestVersion})`}
+              onClick={() => setModal("update")}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "5px",
+                background: "linear-gradient(135deg, rgba(6, 182, 212, 0.2), rgba(147, 51, 234, 0.2))",
+                border: "1px solid rgba(6, 182, 212, 0.4)",
+                color: "#22d3ee",
+                borderRadius: "6px",
+                padding: "3px 8px",
+                fontSize: "12px",
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              <Sparkles size={13} />
+              <span>v{updateInfo.latestVersion}</span>
+            </button>
+          )}
           <button
             className="primary export-button"
             onClick={() => {
@@ -1809,7 +2181,6 @@ export default function App() {
             <nav className="resource-tabs">
               {[
                 ["media", Video, t("nav.media")],
-                ["audio", Music2, t("nav.audio")],
                 ["text", Type, t("nav.text")],
                 ["stickers", Shapes, t("nav.stickers")],
                 ["effects", WandSparkles, t("nav.effects")],
@@ -1828,23 +2199,15 @@ export default function App() {
             </nav>
             <div className="resource-body">
               {tab === "stickers" && <AssetLibrary onAdd={addBuiltin} addingId={addingBuiltin} />}
-              {(tab === "media" || tab === "audio") && (
+              {tab === "media" && (
                 <MediaLibrary
-                  project={
-                    tab === "audio"
-                      ? {
-                          ...s.project,
-                          assets: s.project.assets.filter(
-                            (a) => a.kind === "audio",
-                          ),
-                        }
-                      : s.project
-                  }
+                  project={s.project}
                   onImport={(paths) => void safe(() => importMedia(paths))}
                   onImportFolder={() =>
                     void safe(async () => {
                       if (window.editorAPI?.importMediaFolder) {
                         setImporting(true);
+                        setImportingItems([{ id: `imp-folder-${Date.now()}`, name: "Memindai & mengimpor folder media..." }]);
                         try {
                           const assets = await window.editorAPI.importMediaFolder();
                           if (!assets || assets.length === 0) {
@@ -1855,6 +2218,7 @@ export default function App() {
                           notify(t("notify.mediaImported", { count: assets.length }));
                         } finally {
                           setImporting(false);
+                          setImportingItems([]);
                         }
                       }
                     })
@@ -1865,8 +2229,29 @@ export default function App() {
                     void safe(() => s.removeAsset(assetId))
                   }
                   importing={importing}
+                  importingItems={importingItems}
                   onImportFiles={(files) =>
-                    void safe(async () => s.addAssets(await browserAssets(files)))
+                    void safe(async () => {
+                      setImporting(true);
+                      setImportingItems(
+                        files.map((f, idx) => ({
+                          id: `lib-file-${idx}-${Date.now()}`,
+                          name: f.name,
+                        })),
+                      );
+                      try {
+                        const imported = await browserAssets(files, (doneName, asset) => {
+                          useEditorStore.getState().addAssets([asset]);
+                          setImportingItems((prev) => prev.filter((item) => item.name !== doneName));
+                        });
+                        if (imported.length > 0) {
+                          notify(t("notify.mediaImported", { count: imported.length }));
+                        }
+                      } finally {
+                        setImporting(false);
+                        setImportingItems([]);
+                      }
+                    })
                   }
                   onRevealAsset={(assetId) =>
                     void safe(() => {
@@ -2310,7 +2695,7 @@ export default function App() {
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginBottom: "8px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                     <span style={{ fontSize: "12px", background: "rgba(99, 59, 251, 0.2)", color: "#a78bfa", padding: "2px 8px", borderRadius: "4px", fontWeight: 600 }}>
-                      Drive Aktif: {storageInfo.activeDrive} {storageInfo.isPortable ? "(Portable)" : ""}
+                      Drive: {storageInfo.activeDrive} {storageInfo.isPortable ? "(Self-Contained / Portable)" : ""}
                     </span>
                   </div>
                   <code className="engine-path-pill" style={{ wordBreak: "break-all" }}>
@@ -2446,6 +2831,47 @@ export default function App() {
               )}
             </div>
 
+            {/* Auto-Update Settings Card */}
+            <div className="settings-section">
+              <div className="settings-section-header">
+                <Sparkles size={15} />
+                <h3>{t("settings.update.title")}</h3>
+              </div>
+              <p className="muted">{t("settings.update.description")}</p>
+
+              <div style={{ margin: "10px 0" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13px" }}>
+                  <input
+                    type="checkbox"
+                    checked={updateSettings.autoCheck}
+                    onChange={(e) => void handleToggleAutoCheck(e.target.checked)}
+                  />
+                  <span>{t("settings.update.autoCheck")}</span>
+                </label>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "10px", flexWrap: "wrap" }}>
+                <button
+                  onClick={() => void handleCheckUpdate()}
+                  disabled={checkingUpdate}
+                  style={{ display: "flex", alignItems: "center", gap: "6px" }}
+                >
+                  {checkingUpdate ? <LoaderCircle className="spin" size={14} /> : <Download size={14} />}
+                  <span>{checkingUpdate ? t("settings.update.checking") : t("settings.update.checkNow")}</span>
+                </button>
+                {updateSettings.lastChecked > 0 && (
+                  <span className="muted" style={{ fontSize: "11px" }}>
+                    {t("settings.update.lastChecked")}: {new Date(updateSettings.lastChecked * 1000).toLocaleString()}
+                  </span>
+                )}
+                {updateCheckStatus && (
+                  <span style={{ fontSize: "12px", color: updateCheckStatus.includes("Error") ? "#ef4444" : "#10b981" }}>
+                    {updateCheckStatus}
+                  </span>
+                )}
+              </div>
+            </div>
+
             {/* Privacy Card */}
             <div className="privacy-badge-box">
               <CloudOff size={16} />
@@ -2460,6 +2886,112 @@ export default function App() {
             <button className="primary" onClick={() => setModal(null)}>
               {t("settings.done")}
             </button>
+          </footer>
+        </ModalShell>
+      )}
+      {modal === "update" && updateInfo && (
+        <ModalShell title={t("updateModal.title")} onClose={() => setModal(null)}>
+          <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(255,255,255,0.03)", padding: "12px 16px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div>
+                <span className="muted" style={{ fontSize: "11px", display: "block" }}>{t("updateModal.current")}</span>
+                <strong style={{ fontSize: "14px" }}>v{appVersion}</strong>
+              </div>
+              <span style={{ color: "#22d3ee", fontSize: "18px", fontWeight: "bold" }}>➔</span>
+              <div>
+                <span className="muted" style={{ fontSize: "11px", display: "block" }}>{t("updateModal.latest")}</span>
+                <strong style={{ fontSize: "14px", color: "#22d3ee" }}>v{updateInfo.latestVersion}</strong>
+              </div>
+            </div>
+
+            {updateInfo.releaseName && (
+              <h4 style={{ margin: "4px 0 0 0", fontSize: "15px", fontWeight: 600 }}>{updateInfo.releaseName}</h4>
+            )}
+
+            {updateInfo.releaseNotes && (
+              <div>
+                <strong style={{ fontSize: "12px", display: "block", marginBottom: "6px" }}>{t("updateModal.releaseNotes")}:</strong>
+                <pre style={{
+                  maxHeight: "180px",
+                  overflowY: "auto",
+                  padding: "10px",
+                  background: "#121217",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  fontFamily: "monospace",
+                  whiteSpace: "pre-wrap",
+                  color: "#d4d4d8",
+                  border: "1px solid rgba(255,255,255,0.05)"
+                }}>
+                  {updateInfo.releaseNotes}
+                </pre>
+              </div>
+            )}
+
+            {updateProgress?.status === "downloading" && (
+              <div style={{ marginTop: "4px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "4px" }}>
+                  <span>{t("updateModal.downloading")}</span>
+                  <span>{updateProgress.percentage.toFixed(0)}%</span>
+                </div>
+                <div style={{ width: "100%", height: "8px", background: "rgba(255,255,255,0.1)", borderRadius: "4px", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${updateProgress.percentage}%`,
+                      height: "100%",
+                      background: "linear-gradient(90deg, #06b6d4, #8b5cf6)",
+                      transition: "width 0.2s ease",
+                    }}
+                  />
+                </div>
+                {updateProgress.totalBytes > 0 && (
+                  <span className="muted" style={{ fontSize: "11px", display: "block", marginTop: "4px" }}>
+                    {(updateProgress.downloadedBytes / (1024 * 1024)).toFixed(1)} MB / {(updateProgress.totalBytes / (1024 * 1024)).toFixed(1)} MB
+                  </span>
+                )}
+              </div>
+            )}
+
+            {updateProgress?.status === "completed" && (
+              <div style={{ padding: "10px", background: "rgba(16, 185, 129, 0.1)", border: "1px solid rgba(16, 185, 129, 0.3)", borderRadius: "6px", color: "#34d399", fontSize: "12px" }}>
+                ✓ {t("updateModal.completed")}
+              </div>
+            )}
+
+            {updateProgress?.status === "error" && (
+              <div style={{ padding: "10px", background: "rgba(239, 68, 68, 0.1)", border: "1px solid rgba(239, 68, 68, 0.3)", borderRadius: "6px", color: "#f87171", fontSize: "12px" }}>
+                ✗ {updateProgress.error || t("updateModal.downloadFailed")}
+              </div>
+            )}
+          </div>
+          <footer>
+            {updateProgress?.status === "completed" ? (
+              <button className="primary" onClick={() => void handleInstallUpdate()}>
+                <Sparkles size={14} />
+                {t("updateModal.installRestart")}
+              </button>
+            ) : (
+              <>
+                <button onClick={() => setModal(null)}>{t("updateModal.later")}</button>
+                <button
+                  className="primary"
+                  disabled={updateProgress?.status === "downloading"}
+                  onClick={() => void handleDownloadUpdate()}
+                >
+                  {updateProgress?.status === "downloading" ? (
+                    <>
+                      <LoaderCircle className="spin" size={14} />
+                      {t("updateModal.downloading")}
+                    </>
+                  ) : (
+                    <>
+                      <Download size={14} />
+                      {t("updateModal.downloadNow")}
+                    </>
+                  )}
+                </button>
+              </>
+            )}
           </footer>
         </ModalShell>
       )}
@@ -2490,6 +3022,7 @@ export default function App() {
                   if (currentPath && window.editorAPI) {
                     void window.editorAPI.saveProject(normalized, currentPath);
                   }
+                  setCurrentView("editor");
                   setRecover(null);
                   notify(t("recover.restoredNotify"));
                 } catch (e) {

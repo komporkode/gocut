@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/wailsapp/wails/v2"
@@ -10,6 +11,18 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 )
+
+func init() {
+	// Wails v2.17.0+ devserver validates Host header against WAILS_DEV_ALLOWED_HOSTS.
+	// On Windows with WebView2, requests send Host: wails.localhost:port.
+	// Ensure wails.localhost is trusted so WebSocket IPC handshake succeeds in dev mode.
+	current := os.Getenv("WAILS_DEV_ALLOWED_HOSTS")
+	if current == "" {
+		_ = os.Setenv("WAILS_DEV_ALLOWED_HOSTS", "wails.localhost")
+	} else if !strings.Contains(current, "wails.localhost") {
+		_ = os.Setenv("WAILS_DEV_ALLOWED_HOSTS", current+",wails.localhost")
+	}
+}
 
 //go:embed all:dist
 var assets embed.FS
@@ -28,7 +41,7 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 			Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/media-stream" || strings.HasPrefix(r.URL.Path, "/media-stream/") {
+				if r.URL.Path == "/media-stream" || strings.HasPrefix(r.URL.Path, "/media-stream/") || strings.HasPrefix(r.URL.Path, "/media/") || r.URL.Path == "/media" {
 					app.mediaHandler.ServeHTTP(w, r)
 					return
 				}

@@ -1,5 +1,5 @@
 .keyframe-curve {
-  margin: 0 0 18px;
+  margin: 0 0 16px;
   min-width: 0;
 }
 .keyframe-curve header {
@@ -7,77 +7,94 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  margin-bottom: 8px;
 }
 .keyframe-curve header h3 {
-  margin: 10px 0;
+  margin: 0;
+  font-size: 11.5px;
+  color: #d4d4d8;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 .keyframe-curve svg {
   width: 100%;
-  background: #191b20;
-  border: 1px solid #383b43;
+  background: #121316;
+  border: 1px solid #27272a;
   border-radius: 6px;
   touch-action: none;
   overflow: visible;
 }
 .keyframe-curve svg text {
-  fill: #9ea4af;
+  fill: #71717a;
   font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
   pointer-events: none;
 }
 .curve-grid {
-  stroke: #333741;
-  stroke-width: 0.6;
+  stroke: #27272a;
+  stroke-width: 0.8;
 }
 .curve-line {
   fill: none;
-  stroke: #35d5c7;
+  stroke: var(--accent, #818cf8);
   stroke-width: 2;
   pointer-events: none;
 }
 .curve-playhead {
-  stroke: #f0c66d;
-  stroke-width: 1;
+  stroke: #f59e0b;
+  stroke-width: 1.2;
   stroke-dasharray: 3 3;
   pointer-events: none;
 }
 .curve-point {
-  fill: #252b33;
-  stroke: #35d5c7;
+  fill: #18181b;
+  stroke: var(--accent, #818cf8);
   stroke-width: 2;
   cursor: grab;
 }
 .curve-point.selected {
-  fill: #35d5c7;
-  stroke: white;
+  fill: var(--accent, #633bfb);
+  stroke: #ffffff;
 }
 .curve-point:focus {
   outline: none;
-  stroke: #ffc967;
+  stroke: #f59e0b;
   stroke-width: 3;
 }
 .curve-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
-  margin: 10px 0;
+  margin: 8px 0;
 }
 .curve-actions button {
-  padding: 5px 8px;
-  font-size: 11px;
-  background: #303238;
+  padding: 4px 8px;
+  font-size: 10.5px;
+  background: #18181b;
+  border: 1px solid #2e2e33;
   border-radius: 4px;
+  color: #a1a1aa;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.curve-actions button:hover {
+  background: #27272a;
+  color: #f4f4f5;
+  border-color: #3f3f46;
 }
 .curve-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+  margin-top: 8px;
 }
 .curve-fields label {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  font-size: 11px;
-  color: #aeb3bc;
+  gap: 4px;
+  font-size: 10.5px;
+  color: #a1a1aa;
   min-width: 0;
 }
 .curve-fields label:last-of-type {
@@ -87,4 +104,17 @@
 .curve-fields select {
   width: 100%;
   min-width: 0;
+  height: 26px;
+  background: #18181b;
+  border: 1px solid #2e2e33;
+  border-radius: 4px;
+  color: #f4f4f5;
+  padding: 0 6px;
+  font-size: 11px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.curve-fields input:focus,
+.curve-fields select:focus {
+  border-color: var(--accent, #633bfb);
 }

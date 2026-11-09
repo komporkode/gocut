@@ -25,16 +25,20 @@ export default function TimelineContextMenu({
   onClose,
 }: TimelineContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const handleOutside = (e: MouseEvent) => {
+      // Ignore right-click down so contextmenu events can handle new positioning cleanly
+      if (e.button === 2) return;
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
+        onCloseRef.current();
       }
     };
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("mousedown", handleOutside);
@@ -43,18 +47,24 @@ export default function TimelineContextMenu({
       window.removeEventListener("mousedown", handleOutside);
       window.removeEventListener("keydown", handleKey);
     };
-  }, [onClose]);
+  }, []);
 
-  // Adjust positioning to stay within viewport
-  const adjustedX = Math.min(x, window.innerWidth - 220);
-  const adjustedY = Math.min(y, window.innerHeight - (items.length * 32 + 20));
+  // Adjust positioning to stay safely within viewport
+  const estimatedHeight = items.length * 30 + 16;
+  const adjustedX = Math.max(8, Math.min(x, window.innerWidth - 220));
+  const adjustedY = Math.max(8, Math.min(y, window.innerHeight - estimatedHeight - 12));
 
   return (
     <div
       ref={menuRef}
       className="tl-context-menu"
-      style={{ left: Math.max(8, adjustedX), top: Math.max(8, adjustedY) }}
+      style={{ left: adjustedX, top: adjustedY }}
       role="menu"
+      onContextMenu={(e) => {
+        // Prevent default browser context menu inside custom context menu
+        e.preventDefault();
+        e.stopPropagation();
+      }}
     >
       {items.map((item, index) => {
         if (item.divider) {
@@ -62,10 +72,11 @@ export default function TimelineContextMenu({
         }
         return (
           <button
-            key={`item-${index}`}
+            key={`item-${index}-${item.label}`}
             className={`tl-context-item ${item.danger ? "is-danger" : ""}`}
             disabled={item.disabled}
-            onClick={() => {
+            onClick={(e) => {
+              e.stopPropagation();
               item.onClick();
               onClose();
             }}

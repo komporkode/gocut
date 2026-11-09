@@ -34,13 +34,20 @@ function mediaStreamPlugin(): Plugin {
           req.url &&
           (req.url.startsWith("/media-stream?") ||
             req.url === "/media-stream" ||
-            req.url.startsWith("/media-stream/"))
+            req.url.startsWith("/media-stream/") ||
+            req.url.startsWith("/media?") ||
+            req.url === "/media" ||
+            req.url.startsWith("/media/"))
         ) {
           try {
             const urlObj = new URL(req.url, "http://127.0.0.1:5173");
             let filePath = urlObj.searchParams.get("path") || "";
-            if (!filePath && req.url.startsWith("/media-stream/")) {
-              filePath = decodeURIComponent(req.url.slice("/media-stream/".length));
+            if (!filePath) {
+              if (req.url.startsWith("/media-stream/")) {
+                filePath = decodeURIComponent(req.url.slice("/media-stream/".length));
+              } else if (req.url.startsWith("/media/")) {
+                filePath = decodeURIComponent(req.url.slice("/media/".length));
+              }
             }
             if (!filePath) {
               res.statusCode = 400;
@@ -133,5 +140,17 @@ export default defineConfig(({ command }) => ({
     react(),
   ],
   base: "./",
-  server: { host: "127.0.0.1", port: 5173, strictPort: true },
+  server: {
+    host: "127.0.0.1",
+    port: 5173,
+    strictPort: true,
+    cors: true,
+    allowedHosts: ["wails.localhost", "localhost", "127.0.0.1"],
+    hmr: {
+      protocol: "ws",
+      host: "127.0.0.1",
+      port: 5173,
+      clientPort: 5173,
+    },
+  },
 }));

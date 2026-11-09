@@ -34,6 +34,7 @@ type StorageInfo struct {
 	IsPortable  bool   `json:"isPortable"`
 	ProjectsDir string `json:"projectsDir"`
 	CacheDir    string `json:"cacheDir"`
+	TempDir     string `json:"tempDir"`
 	ModelsDir   string `json:"modelsDir"`
 }
 
@@ -42,15 +43,55 @@ type StorageManager struct {
 	isPortable bool
 }
 
+func migrateLegacyDataIfEmpty(targetDir string) {
+	// If targetDir already has autosave or recent, no migration needed
+	if _, err := os.Stat(filepath.Join(targetDir, "autosave.gct")); err == nil {
+		return
+	}
+
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return
+	}
+	legacyLocations := []string{
+		filepath.Join(base, "ReaCut"),
+		filepath.Join(base, "GoCut"),
+	}
+
+	for _, loc := range legacyLocations {
+		// Copy autosave if present
+		for _, name := range []string{"autosave.gct", "autosave.reacut"} {
+			src := filepath.Join(loc, name)
+			if content, err := os.ReadFile(src); err == nil && len(content) > 0 {
+				dst := filepath.Join(targetDir, "autosave.gct")
+				_ = os.WriteFile(dst, content, 0644)
+				break
+			}
+		}
+		// Copy recent.json if present
+		srcRecent := filepath.Join(loc, "recent.json")
+		dstRecent := filepath.Join(targetDir, "recent.json")
+		if _, err := os.Stat(dstRecent); os.IsNotExist(err) {
+			if content, err := os.ReadFile(srcRecent); err == nil && len(content) > 0 {
+				_ = os.WriteFile(dstRecent, content, 0644)
+			}
+		}
+	}
+}
+
 func resolveDataDir() (string, bool) {
-	if execPath, err := os.Executable(); err == nil {
-		execDir := filepath.Dir(execPath)
-		if stat, err := os.Stat(filepath.Join(execDir, "data")); err == nil && stat.IsDir() {
-			return filepath.Join(execDir, "data"), true
+	// 1. Explicit environment variable override
+	if custom := os.Getenv("GOCUT_DATA_DIR"); custom != "" {
+		clean := filepath.Clean(custom)
+		if err := os.MkdirAll(clean, 0755); err == nil {
+			return clean, true
 		}
-		if stat, err := os.Stat(filepath.Join(execDir, "..", "data")); err == nil && stat.IsDir() {
-			return filepath.Clean(filepath.Join(execDir, "..", "data")), true
-		}
+	}
+
+	execPath, err := os.Executable()
+	var execDir string
+	if err == nil {
+		execDir = filepath.Dir(execPath)
 		cfgFile := filepath.Join(execDir, "config.json")
 		if data, err := os.ReadFile(cfgFile); err == nil {
 			var cfg struct {
@@ -63,11 +104,46 @@ func resolveDataDir() (string, bool) {
 			}
 		}
 	}
+
+	// 2. Detect GoCut application base directory
+	// In dev mode (e.g. running under build/bin or wails dev), detect project repository root
+	appRoot := execDir
+	if execDir != "" {
+		if stat, err := os.Stat(filepath.Join(execDir, "..", "..", "package.json")); err == nil && !stat.IsDir() {
+			appRoot = filepath.Clean(filepath.Join(execDir, "..", ".."))
+		} else if stat, err := os.Stat(filepath.Join(execDir, "..", "package.json")); err == nil && !stat.IsDir() {
+			appRoot = filepath.Clean(filepath.Join(execDir, ".."))
+		}
+	}
+	if appRoot == "" {
+		if wd, err := os.Getwd(); err == nil {
+			appRoot = wd
+		}
+	}
+
+	// 3. Primary: Self-contained data folder inside GoCut directory (<appRoot>/data)
+	if appRoot != "" {
+		candidate := filepath.Join(appRoot, "data")
+		if err := os.MkdirAll(candidate, 0755); err == nil {
+			// Probe write access to guarantee the folder is usable
+			probe := filepath.Join(candidate, ".probe_writable")
+			if err := os.WriteFile(probe, []byte("ok"), 0644); err == nil {
+				_ = os.Remove(probe)
+				migrateLegacyDataIfEmpty(candidate)
+				return candidate, true
+			}
+		}
+	}
+
+	// 4. Fallback if app directory is strictly read-only (e.g. restricted Program Files)
 	base, err := os.UserConfigDir()
 	if err != nil {
 		base = os.TempDir()
 	}
-	return filepath.Join(base, "ReaCut"), false
+	fallback := filepath.Join(base, "GoCut", "data")
+	_ = os.MkdirAll(fallback, 0755)
+	migrateLegacyDataIfEmpty(fallback)
+	return fallback, false
 }
 
 func NewStorageManager() (*StorageManager, error) {
@@ -78,6 +154,14 @@ func NewStorageManager() (*StorageManager, error) {
 	mgr := &StorageManager{configDir: dir, isPortable: portable}
 	_ = os.MkdirAll(mgr.GetProjectsDir(), 0755)
 	_ = os.MkdirAll(mgr.GetCacheDir(), 0755)
+	_ = os.MkdirAll(mgr.GetTempDir(), 0755)
+	_ = os.MkdirAll(filepath.Join(mgr.GetCacheDir(), "thumbnails"), 0755)
+	_ = os.MkdirAll(filepath.Join(mgr.GetCacheDir(), "proxies"), 0755)
+	_ = os.MkdirAll(filepath.Join(mgr.GetCacheDir(), "media"), 0755)
+	_ = os.MkdirAll(filepath.Join(mgr.GetCacheDir(), "solids"), 0755)
+	_ = os.MkdirAll(filepath.Join(mgr.GetTempDir(), "subtitles"), 0755)
+	_ = os.MkdirAll(filepath.Join(mgr.GetTempDir(), "logs"), 0755)
+	_ = os.MkdirAll(filepath.Join(mgr.GetTempDir(), "updates"), 0755)
 	_ = os.MkdirAll(mgr.GetModelsDir("whisper"), 0755)
 	return mgr, nil
 }
@@ -86,16 +170,55 @@ func (s *StorageManager) GetDataDir() string {
 	return s.configDir
 }
 
+func (s *StorageManager) GetProjectsDir() string {
+	dir := filepath.Join(s.configDir, "projects")
+	if stat, err := os.Stat(filepath.Join(s.configDir, "Projects")); err == nil && stat.IsDir() {
+		dir = filepath.Join(s.configDir, "Projects")
+	}
+	_ = os.MkdirAll(dir, 0755)
+	return dir
+}
+
 func (s *StorageManager) GetCacheDir() string {
-	dir := filepath.Join(s.configDir, "Cache")
+	dir := filepath.Join(s.configDir, "cache")
+	if stat, err := os.Stat(filepath.Join(s.configDir, "Cache")); err == nil && stat.IsDir() {
+		dir = filepath.Join(s.configDir, "Cache")
+	}
+	_ = os.MkdirAll(dir, 0755)
+	return dir
+}
+
+func (s *StorageManager) GetTempDir() string {
+	dir := filepath.Join(s.configDir, "tmp")
+	if stat, err := os.Stat(filepath.Join(s.configDir, "Tmp")); err == nil && stat.IsDir() {
+		dir = filepath.Join(s.configDir, "Tmp")
+	}
 	_ = os.MkdirAll(dir, 0755)
 	return dir
 }
 
 func (s *StorageManager) GetModelsDir(sub string) string {
-	dir := filepath.Join(s.configDir, "Models", sub)
+	base := filepath.Join(s.configDir, "models")
+	if stat, err := os.Stat(filepath.Join(s.configDir, "Models")); err == nil && stat.IsDir() {
+		base = filepath.Join(s.configDir, "Models")
+	}
+	dir := filepath.Join(base, sub)
 	_ = os.MkdirAll(dir, 0755)
 	return dir
+}
+
+func (s *StorageManager) CleanupTemp(maxAge time.Duration) {
+	tempDir := s.GetTempDir()
+	cutoff := time.Now().Add(-maxAge)
+	_ = filepath.Walk(tempDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || path == tempDir {
+			return nil
+		}
+		if !info.IsDir() && info.ModTime().Before(cutoff) {
+			_ = os.Remove(path)
+		}
+		return nil
+	})
 }
 
 func (s *StorageManager) GetStorageInfo() StorageInfo {
@@ -109,6 +232,7 @@ func (s *StorageManager) GetStorageInfo() StorageInfo {
 		IsPortable:  s.isPortable,
 		ProjectsDir: s.GetProjectsDir(),
 		CacheDir:    s.GetCacheDir(),
+		TempDir:     s.GetTempDir(),
 		ModelsDir:   s.GetModelsDir("whisper"),
 	}
 }
@@ -131,6 +255,7 @@ func (s *StorageManager) RelocateDataDir(newDriveRoot string) error {
 	s.isPortable = false
 	_ = os.MkdirAll(s.GetProjectsDir(), 0755)
 	_ = os.MkdirAll(s.GetCacheDir(), 0755)
+	_ = os.MkdirAll(s.GetTempDir(), 0755)
 	_ = os.MkdirAll(s.GetModelsDir("whisper"), 0755)
 	return nil
 }
@@ -192,10 +317,61 @@ func (s *StorageManager) GetRecent() ([]RecentEntry, error) {
 	if err := json.Unmarshal(content, &entries); err != nil {
 		return []RecentEntry{}, nil
 	}
-	return entries, nil
+
+	var valid []RecentEntry
+	changed := false
+	for _, e := range entries {
+		if strings.HasPrefix(e.Path, "/projects/") {
+			changed = true
+			continue
+		}
+		if _, err := os.Stat(e.Path); err != nil {
+			changed = true
+			continue
+		}
+		valid = append(valid, e)
+	}
+
+	if changed {
+		data, mErr := json.MarshalIndent(valid, "", "  ")
+		if mErr == nil {
+			_ = s.SaveAtomic(recentFile, data)
+		}
+	}
+
+	return valid, nil
+}
+
+func (s *StorageManager) RemoveRecent(path string) error {
+	recentFile := filepath.Join(s.configDir, "recent.json")
+	content, err := os.ReadFile(recentFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var entries []RecentEntry
+	if err := json.Unmarshal(content, &entries); err != nil {
+		return nil
+	}
+	var filtered []RecentEntry
+	for _, e := range entries {
+		if e.Path != path {
+			filtered = append(filtered, e)
+		}
+	}
+	data, err := json.MarshalIndent(filtered, "", "  ")
+	if err != nil {
+		return err
+	}
+	return s.SaveAtomic(recentFile, data)
 }
 
 func (s *StorageManager) AddRecent(name, path string) error {
+	if strings.HasPrefix(path, "/projects/") {
+		return nil
+	}
 	entries, _ := s.GetRecent()
 	var filtered []RecentEntry
 	for _, e := range entries {
@@ -221,12 +397,6 @@ func (s *StorageManager) AddRecent(name, path string) error {
 		return err
 	}
 	return s.SaveAtomic(recentFile, data)
-}
-
-func (s *StorageManager) GetProjectsDir() string {
-	dir := filepath.Join(s.configDir, "Projects")
-	_ = os.MkdirAll(dir, 0755)
-	return dir
 }
 
 func (s *StorageManager) ListProjects() ([]ProjectEntry, error) {
@@ -342,10 +512,12 @@ func (s *StorageManager) CreateProject(name string) (ProjectEntry, error) {
 	targetPath := filepath.Join(projectFolder, "project.gct")
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	initialProject := fmt.Sprintf(`{"version":1,"id":%q,"name":%q,"width":1920,"height":1080,"fps":30,"background":"#101015","createdAt":%q,"updatedAt":%q,"tracks":[{"id":"t-text-1","kind":"text","name":"Text","muted":false,"hidden":false,"locked":false},{"id":"t-video-1","kind":"video","name":"Video 1","muted":false,"hidden":false,"locked":false},{"id":"t-audio-1","kind":"audio","name":"Audio 1","muted":false,"hidden":false,"locked":false}],"clips":[],"assets":[]}`, cleanName, name, now, now)
+	projectID := fmt.Sprintf("%s-%d", cleanName, time.Now().UnixNano())
+	initialProject := fmt.Sprintf(`{"version":1,"id":%q,"name":%q,"width":1920,"height":1080,"fps":30,"background":"#101015","createdAt":%q,"updatedAt":%q,"tracks":[{"id":"t-text-1","kind":"text","name":"Text","muted":false,"hidden":false,"locked":false},{"id":"t-video-1","kind":"video","name":"Video 1","muted":false,"hidden":false,"locked":false},{"id":"t-audio-1","kind":"audio","name":"Audio 1","muted":false,"hidden":false,"locked":false}],"clips":[],"assets":[]}`, projectID, name, now, now)
 	if err := s.SaveAtomic(targetPath, []byte(initialProject)); err != nil {
 		return ProjectEntry{}, err
 	}
+	_ = s.Autosave([]byte(initialProject))
 	_ = s.AddRecent(name, targetPath)
 	return ProjectEntry{
 		ID:        cleanName,
@@ -471,6 +643,7 @@ func (s *StorageManager) RenameProject(projectPath string, newName string) (Proj
 }
 
 func (s *StorageManager) DeleteProject(projectPath string) error {
+	_ = s.RemoveRecent(projectPath)
 	if filepath.Base(projectPath) == "project.gct" {
 		return os.RemoveAll(filepath.Dir(projectPath))
 	}

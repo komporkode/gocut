@@ -63,4 +63,39 @@ describe('Player Gizmo & Aspect Ratio Logic', () => {
     expect(snapAngle(43.7, true)).toBe(45);
     expect(snapAngle(88, true)).toBe(90);
   });
+
+  it('correctly classifies project orientation and supports dynamic rotation swap', () => {
+    const classifyAspect = (w: number, h: number) => {
+      const aspect = w / h;
+      return {
+        isPortrait: aspect < 0.9,
+        isSquare: aspect >= 0.9 && aspect <= 1.15,
+        isLandscape: aspect > 1.15,
+        ratioLabel:
+          Math.abs(aspect - 16 / 9) < 0.05
+            ? '16:9'
+            : Math.abs(aspect - 9 / 16) < 0.05
+              ? '9:16'
+              : Math.abs(aspect - 1) < 0.05
+                ? '1:1'
+                : `${w}:${h}`,
+      };
+    };
+
+    const landscape = classifyAspect(1920, 1080);
+    expect(landscape.isLandscape).toBe(true);
+    expect(landscape.isPortrait).toBe(false);
+    expect(landscape.ratioLabel).toBe('16:9');
+
+    // Rotate orientation (swap width and height)
+    const rotated = classifyAspect(1080, 1920);
+    expect(rotated.isPortrait).toBe(true);
+    expect(rotated.isLandscape).toBe(false);
+    expect(rotated.ratioLabel).toBe('9:16');
+
+    // Square
+    const square = classifyAspect(1080, 1080);
+    expect(square.isSquare).toBe(true);
+    expect(square.ratioLabel).toBe('1:1');
+  });
 });

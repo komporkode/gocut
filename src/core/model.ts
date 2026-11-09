@@ -11,6 +11,7 @@ import type {
 import {
   DEFAULT_TRANSFORM,
   DEFAULT_ADJUSTMENTS,
+  DEFAULT_CLIP_EFFECTS,
   DEFAULT_TEXT,
 } from "./defaults";
 export const id = () => crypto.randomUUID();
@@ -22,15 +23,18 @@ export const projectDuration = (project: Project): number =>
     (end, clip) => Math.max(end, clip.start + clip.duration),
     0,
   );
-export function createProject(name = "Untitled Project"): Project {
+export function createProject(
+  name = "Untitled Project",
+  options?: { width?: number; height?: number; fps?: number },
+): Project {
   const now = new Date().toISOString();
   return {
     version: 1,
     id: id(),
     name,
-    width: 1920,
-    height: 1080,
-    fps: 30,
+    width: options?.width ?? 1920,
+    height: options?.height ?? 1080,
+    fps: options?.fps ?? 30,
     background: "#101015",
     assets: [],
     tracks: [
@@ -101,6 +105,34 @@ export function createClip(
     transform: { ...DEFAULT_TRANSFORM },
     adjustments: { ...DEFAULT_ADJUSTMENTS },
     text: !asset ? { ...DEFAULT_TEXT } : undefined,
+    fadeIn: 0,
+    fadeOut: 0,
+    audioFadeIn: 0,
+    audioFadeOut: 0,
+    keyframes: [],
+  };
+}
+export function createAdjustmentClip(
+  trackId: string,
+  start: number,
+  duration: number,
+  fps: number,
+  name = "Adjustment Layer",
+): Clip {
+  return {
+    id: id(),
+    trackId,
+    name,
+    start: snapToFrame(Math.max(0, start), fps),
+    duration: Math.max(1 / fps, duration),
+    sourceIn: 0,
+    speed: 1,
+    volume: 1,
+    muted: true,
+    transform: { ...DEFAULT_TRANSFORM },
+    adjustments: { ...DEFAULT_ADJUSTMENTS },
+    effects: structuredClone(DEFAULT_CLIP_EFFECTS),
+    isAdjustmentLayer: true,
     fadeIn: 0,
     fadeOut: 0,
     audioFadeIn: 0,
@@ -619,6 +651,9 @@ export function validateProject(input: unknown): Project {
       num(text.strokeWidth, "描边宽度", 0, 100);
       choice(text.align, ["left", "center", "right"], "文字对齐");
       bool(text.bold, "粗体");
+    } else if (c.isCompound || c.isAdjustmentLayer) {
+      if (track!.kind !== "video" && track!.kind !== "image")
+        fail("片段轨道与素材类型");
     } else {
       if (
         !asset ||

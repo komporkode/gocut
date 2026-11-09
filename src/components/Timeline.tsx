@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -9,7 +10,9 @@ import {
   AudioLines,
   ArrowDown,
   ArrowUp,
+  Bookmark,
   ChevronDown,
+  ClipboardPaste,
   Copy,
   Crop,
   Eye,
@@ -30,6 +33,7 @@ import {
   RotateCcw,
   Scissors,
   Snowflake,
+  Sparkles,
   Trash2,
   Type,
   Undo2,
@@ -218,6 +222,7 @@ export function calculateInsertionSlot(
 export function canMoveToTrack(clip: Clip, track: Track | undefined, project: Project) {
   if (!track || track.locked) return false;
   if (clip.text) return track.kind === "text";
+  if (clip.isAdjustmentLayer || clip.isCompound) return track.kind === "video";
   const kind =
     project.assets.find((a) => a.id === clip.assetId)?.kind ??
     project.tracks.find((t) => t.id === clip.trackId)?.kind;
@@ -334,6 +339,9 @@ export default function Timeline(props: TimelineProps) {
     y: number;
     items: ContextMenuItem[];
   } | null>(null);
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
   const playhead = props.playhead ?? storePlayhead;
   const playing = props.playing ?? storePlaying;
   const { project, selectedIds, zoom, onSeek, onSelect } = props;
@@ -697,7 +705,8 @@ export default function Timeline(props: TimelineProps) {
     window.addEventListener("pointercancel", cancel, { once: true });
   };
   const locate = (clientX: number, clientY: number) => {
-    const el = scrollRef.current!;
+    const el = scrollRef.current;
+    if (!el) return { x: 0, y: 0 };
     const rect = el.getBoundingClientRect();
     return {
       x: Math.max(0, clientX - rect.left + el.scrollLeft - GUTTER),
@@ -716,6 +725,7 @@ export default function Timeline(props: TimelineProps) {
     const candidates = [
       0,
       playhead,
+      ...(project.markers ?? []).map((m) => m.time),
       ...project.clips
         .filter((c) => !excluded.includes(c.id))
         .flatMap((c) => [c.start, c.start + c.duration]),
@@ -730,6 +740,7 @@ export default function Timeline(props: TimelineProps) {
     if (!snapping) return rawTime;
     const candidates = [
       0,
+      ...(project.markers ?? []).map((m) => m.time),
       ...project.clips.flatMap((c) => [c.start, c.start + c.duration]),
     ];
     return snapTimelineTime(rawTime, candidates, 10 / pps);
@@ -928,7 +939,7 @@ export default function Timeline(props: TimelineProps) {
           targetTrackId = compatible ? candidate.id : clip.trackId;
         }
 
-        const isMain = !isNewTrack && targetTrackId === primaryVideoTrack?.id;
+        const isMain = Boolean(magnetic) && !isNewTrack && targetTrackId === primaryVideoTrack?.id;
         let insertSlot: { insertTime: number; insertIndex: number } | undefined;
         if (isMain) {
           const targetClips = project.clips.filter((c) => c.trackId === targetTrackId);
@@ -980,7 +991,7 @@ export default function Timeline(props: TimelineProps) {
           });
           useEditorStore.getState().commit(pruneEmptyOverlayTracks({ ...p, tracks, clips }));
         } else {
-          const isMain = g.targetTrackId === primaryVideoTrack?.id;
+          const isMain = Boolean(magnetic) && g.targetTrackId === primaryVideoTrack?.id;
           if (isMain && g.insertSlot) {
             useEditorStore
               .getState()
@@ -1092,6 +1103,37 @@ export default function Timeline(props: TimelineProps) {
         useEditorStore.getState().addFolderToTimeline(folderPath, "ripple", dropTime);
         return;
       }
+    }
+    const isEffectDrag =
+      event.dataTransfer.types.includes("application/x-gocut-effect") ||
+      event.dataTransfer.types.includes("application/x-reacut-effect");
+    if (isEffectDrag && !track.locked) {
+      const raw =
+        event.dataTransfer.getData("application/x-gocut-effect") ||
+        event.dataTransfer.getData("application/x-reacut-effect");
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          const dropTime = snapToFrame(
+            Math.max(0, locate(event.clientX, event.clientY).x / pps),
+            project.fps,
+          );
+          const patch: Partial<Clip> = {
+            name: parsed.name || "Adjustment Layer",
+            ...(parsed.effects ? { effects: parsed.effects } : {}),
+            ...(parsed.adjustments ? { adjustments: parsed.adjustments } : (!parsed.effects ? { adjustments: parsed } : {})),
+          };
+          useEditorStore
+            .getState()
+            .addAdjustmentLayer(
+              dropTime,
+              5,
+              patch,
+              track.kind === "video" ? track.id : undefined,
+            );
+        } catch {}
+      }
+      return;
     }
     const isTextDrag =
       event.dataTransfer.types.includes("application/x-gocut-text") ||
@@ -1397,6 +1439,21 @@ export default function Timeline(props: TimelineProps) {
           >
             <Trash2 size={16} />
           </button>
+          <span className="tl-divider" />
+          <button
+            title="Tambah Marker di Playhead · M"
+            aria-label="Tambah Marker · M"
+            onClick={() => useEditorStore.getState().addMarker()}
+          >
+            <Bookmark size={15} />
+          </button>
+          <button
+            title="Tambah Adjustment Layer di Playhead"
+            aria-label="Tambah Adjustment Layer"
+            onClick={() => useEditorStore.getState().addAdjustmentLayer()}
+          >
+            <Layers size={15} />
+          </button>
 
           {activeClip && (
             <div className="tl-toolbar-contextual" data-testid="timeline-contextual-group">
@@ -1496,11 +1553,16 @@ export default function Timeline(props: TimelineProps) {
           </button>
 
           <span className="tl-duration">
-            {formatTimelineTime(playhead, project.fps)} <i>/</i>{" "}
-            {formatTimelineTime(
-              Math.max(0, ...project.clips.map((c) => c.start + c.duration)),
-              project.fps,
-            )}
+            <span className="tl-duration-current">
+              {formatTimelineTime(playhead, project.fps)}
+            </span>
+            <span className="tl-duration-sep"> <i>/</i> </span>
+            <span className="tl-duration-total">
+              {formatTimelineTime(
+                Math.max(0, ...project.clips.map((c) => c.start + c.duration)),
+                project.fps,
+              )}
+            </span>
           </span>
           <button
             title={t("toolbar.zoomOut")}
@@ -1618,6 +1680,49 @@ export default function Timeline(props: TimelineProps) {
                 <div className="tl-tick" key={t} style={{ left: t * pps }}>
                   <span>{formatRulerTime(t, interval < 1)}</span>
                   <i />
+                </div>
+              ))}
+              {(project.markers ?? []).map((marker) => (
+                <div
+                  key={marker.id}
+                  className="tl-marker-pin"
+                  style={
+                    {
+                      left: marker.time * pps,
+                      "--marker-color": marker.color || "#f59e0b",
+                    } as CSSProperties
+                  }
+                  title={`${marker.label} (${formatTimelineTime(marker.time, project.fps)})\nKlik: Lompat · Klik Kanan: Menu`}
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    onSeek(marker.time);
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const clientX = e.clientX;
+                    const clientY = e.clientY;
+                    setContextMenu({
+                      x: clientX,
+                      y: clientY,
+                      items: [
+                        {
+                          label: `Lompat ke "${marker.label}"`,
+                          icon: <Bookmark size={14} />,
+                          onClick: () => onSeek(marker.time),
+                        },
+                        {
+                          label: "Hapus Marker",
+                          icon: <Trash2 size={14} />,
+                          danger: true,
+                          onClick: () =>
+                            useEditorStore.getState().removeMarker(marker.id),
+                        },
+                      ],
+                    });
+                  }}
+                >
+                  <span className="tl-marker-flag">{marker.label}</span>
                 </div>
               ))}
               <div
@@ -1812,6 +1917,17 @@ export default function Timeline(props: TimelineProps) {
                     </button>
                   )}
                   <button
+                    title={`Solo Track (${track.name})`}
+                    aria-label={`Solo: ${track.name}`}
+                    aria-pressed={Boolean(track.solo)}
+                    className={`tl-solo-btn ${track.solo ? "is-active is-solo" : ""}`}
+                    onClick={() =>
+                      useEditorStore.getState().toggleTrackSolo(track.id)
+                    }
+                  >
+                    S
+                  </button>
+                  <button
                     title={t("timeline.moveTrackUp")}
                     aria-label={`${t("timeline.moveTrackUp")}: ${track.name}`}
                     disabled={index <= 0 || track.locked || visibleTracks[index - 1]?.locked}
@@ -1864,7 +1980,9 @@ export default function Timeline(props: TimelineProps) {
                 onPointerDown={startSelection}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  const clickTime = locate(e.clientX, e.clientY).x / pps;
+                  const clientX = e.clientX;
+                  const clientY = e.clientY;
+                  const clickTime = snapToFrame(Math.max(0, locate(clientX, clientY).x / pps), project.fps);
                   const items: ContextMenuItem[] = [
                     {
                       label: t("shortcuts.paste") || "Paste",
@@ -1897,7 +2015,7 @@ export default function Timeline(props: TimelineProps) {
                       onClick: () => setActiveTool("razor"),
                     },
                   ];
-                  setContextMenu({ x: e.clientX, y: e.clientY, items });
+                  setContextMenu({ x: clientX, y: clientY, items });
                 }}
                 onDragOver={(event) => {
                   if (event.dataTransfer.types.includes("application/x-reacut-transition") || event.dataTransfer.types.includes("application/x-gocut-transition")) {
@@ -1907,7 +2025,12 @@ export default function Timeline(props: TimelineProps) {
                     }
                     return;
                   }
-                  if (event.dataTransfer.types.includes("application/x-reacut-text") || event.dataTransfer.types.includes("application/x-gocut-text")) {
+                  if (
+                    event.dataTransfer.types.includes("application/x-reacut-text") ||
+                    event.dataTransfer.types.includes("application/x-gocut-text") ||
+                    event.dataTransfer.types.includes("application/x-gocut-effect") ||
+                    event.dataTransfer.types.includes("application/x-reacut-effect")
+                  ) {
                     if (!track.locked) {
                       event.preventDefault();
                       event.dataTransfer.dropEffect = "copy";
@@ -2021,9 +2144,11 @@ export default function Timeline(props: TimelineProps) {
                             e.stopPropagation();
                             selectTransition(trans.id);
                             setSelectedTransition(trans.id);
+                            const clientX = e.clientX;
+                            const clientY = e.clientY;
                             setContextMenu({
-                              x: e.clientX,
-                              y: e.clientY,
+                              x: clientX,
+                              y: clientY,
                               items: [
                                 {
                                   label: t("toolbar.delete") || "Hapus Transisi",
@@ -2073,7 +2198,7 @@ export default function Timeline(props: TimelineProps) {
 
                           <div className="tl-bridge-center">
                             <span className="tl-transition-bowtie" aria-hidden="true">
-                              <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+                              <svg width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
                                 <polygon points="1,2 8,8 1,14" />
                                 <polygon points="15,2 8,8 15,14" />
                               </svg>
@@ -2129,14 +2254,14 @@ export default function Timeline(props: TimelineProps) {
                         <button
                           key={`cut-${prev.id}-${clip.id}`}
                           className="tl-cut-badge"
-                          style={{ left: cutSeam - 10 }}
+                          style={{ left: cutSeam - 7.5 }}
                           title="Tambah Transisi (+)"
                           onClick={(e) => {
                             e.stopPropagation();
                             useEditorStore.getState().addTransitionRecord(track.id, prev.id, clip.id, "dissolve", 0.5);
                           }}
                         >
-                          <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                          <svg width="8" height="8" viewBox="0 0 16 16" fill="currentColor">
                             <polygon points="1,2 8,8 1,14" />
                             <polygon points="15,2 8,8 15,14" />
                           </svg>
@@ -2182,7 +2307,7 @@ export default function Timeline(props: TimelineProps) {
                       <div
                         key={clip.id}
                         data-clip-id={clip.id}
-                        className={`tl-clip tl-clip-${track.kind} ${selected ? "is-selected" : ""} ${dragging ? "is-dragging is-drag-source-ghost" : ""} ${track.hidden ? "is-hidden" : ""} ${asset?.missing ? "is-missing" : ""} ${clip.isCompound ? "tl-clip-compound" : ""}`}
+                        className={`tl-clip tl-clip-${track.kind} ${selected ? "is-selected" : ""} ${dragging ? "is-dragging is-drag-source-ghost" : ""} ${track.hidden ? "is-hidden" : ""} ${asset?.missing ? "is-missing" : ""} ${clip.isCompound ? "tl-clip-compound" : ""} ${clip.isAdjustmentLayer ? "tl-clip-adjustment" : ""}`}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
                           if (clip.isCompound) {
@@ -2215,8 +2340,26 @@ export default function Timeline(props: TimelineProps) {
                             const raw = e.dataTransfer.getData("application/x-gocut-effect") || e.dataTransfer.getData("application/x-reacut-effect");
                             if (raw) {
                               try {
-                                const adjustments = JSON.parse(raw);
-                                props.onClipUpdate(clip.id, { adjustments: { ...clip.adjustments, ...adjustments } });
+                                const parsed = JSON.parse(raw);
+                                const updatePatch: Partial<Clip> = {};
+                                if (parsed.effects) {
+                                  updatePatch.effects = {
+                                    ...(clip.effects ?? {}),
+                                    ...parsed.effects,
+                                  };
+                                }
+                                if (parsed.adjustments) {
+                                  updatePatch.adjustments = {
+                                    ...clip.adjustments,
+                                    ...parsed.adjustments,
+                                  };
+                                } else if (!parsed.effects) {
+                                  updatePatch.adjustments = {
+                                    ...clip.adjustments,
+                                    ...parsed,
+                                  };
+                                }
+                                props.onClipUpdate(clip.id, updatePatch);
                               } catch {}
                             }
                             return;
@@ -2238,9 +2381,29 @@ export default function Timeline(props: TimelineProps) {
                         onContextMenu={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          onSelect([clip.id]);
-                          const canSeparate = track.kind === "video" && (asset?.hasAudio || asset?.kind === "audio") && !clip.linkId;
-                          const canRecover = !!clip.linkId;
+                          const clientX = e.clientX;
+                          const clientY = e.clientY;
+                          const clickTime = snapToFrame(
+                            Math.max(0, locate(clientX, clientY).x / pps),
+                            project.fps,
+                          );
+
+                          // Preserve existing multi-selection if right-clicking one of the selected clips
+                          const activeSelection = selectedIds.includes(clip.id)
+                            ? selectedIds
+                            : [clip.id];
+                          if (!selectedIds.includes(clip.id)) {
+                            onSelect([clip.id]);
+                          }
+
+                          const isAdj = Boolean(clip.isAdjustmentLayer);
+                          const canSeparate =
+                            !isAdj &&
+                            track.kind === "video" &&
+                            (asset?.hasAudio || asset?.kind === "audio") &&
+                            !clip.linkId;
+                          const canRecover = !isAdj && Boolean(clip.linkId);
+
                           const items: ContextMenuItem[] = [
                             {
                               label: t("toolbar.split") || "Split",
@@ -2248,7 +2411,6 @@ export default function Timeline(props: TimelineProps) {
                               shortcut: "⌘B",
                               disabled: track.locked,
                               onClick: () => {
-                                const clickTime = locate(e.clientX, e.clientY).x / pps;
                                 splitAt(clip.id, clickTime);
                               },
                             },
@@ -2265,52 +2427,88 @@ export default function Timeline(props: TimelineProps) {
                               disabled: track.locked,
                               onClick: () => useEditorStore.getState().duplicate(),
                             },
+                            {
+                              label: "Copy Effects / Attributes",
+                              icon: <Sparkles size={14} />,
+                              shortcut: "Ctrl+Alt+C",
+                              onClick: () =>
+                                useEditorStore
+                                  .getState()
+                                  .copyClipAttributes(clip.id),
+                            },
+                            {
+                              label: "Paste Effects / Attributes",
+                              icon: <ClipboardPaste size={14} />,
+                              shortcut: "Ctrl+Alt+V",
+                              disabled:
+                                track.locked ||
+                                !useEditorStore.getState().attributeClipboard,
+                              onClick: () => {
+                                useEditorStore
+                                  .getState()
+                                  .pasteClipAttributes(activeSelection);
+                              },
+                            },
                             { divider: true, label: "", onClick: () => {} },
-                            ...(canSeparate ? [
-                              {
-                                label: "Pisahkan Audio",
-                                icon: <AudioLines size={14} />,
-                                disabled: track.locked,
-                                onClick: () => separateAudio(clip.id),
-                              },
-                            ] : []),
-                            ...(canRecover ? [
-                              {
-                                label: "Pulihkan Audio Asal",
-                                icon: <Volume2 size={14} />,
-                                disabled: track.locked,
-                                onClick: () => recoverAudio(clip.id),
-                              },
-                            ] : []),
-                            ...(clip.isCompound ? [
-                              {
-                                label: "Buka Klip Bersarang (Masuk Sub-Timeline)",
-                                icon: <Layers size={14} />,
-                                onClick: () => enterCompoundClip(clip.id),
-                              },
-                              {
-                                label: "Pisahkan Klip Bersarang (Ungroup)",
-                                icon: <Scissors size={14} />,
-                                disabled: track.locked,
-                                onClick: () => ungroupCompoundClip(clip.id),
-                              },
-                            ] : selectedIds.length >= 2 ? [
-                              {
-                                label: "Buat Klip Bersarang (Compound Clip)",
-                                icon: <Layers size={14} />,
-                                disabled: track.locked,
-                                onClick: () => useEditorStore.getState().createCompoundClip(selectedIds),
-                              },
-                            ] : []),
+                            ...(canSeparate
+                              ? [
+                                  {
+                                    label: "Pisahkan Audio",
+                                    icon: <AudioLines size={14} />,
+                                    disabled: track.locked,
+                                    onClick: () => separateAudio(clip.id),
+                                  },
+                                ]
+                              : []),
+                            ...(canRecover
+                              ? [
+                                  {
+                                    label: "Pulihkan Audio Asal",
+                                    icon: <Volume2 size={14} />,
+                                    disabled: track.locked,
+                                    onClick: () => recoverAudio(clip.id),
+                                  },
+                                ]
+                              : []),
+                            ...(clip.isCompound
+                              ? [
+                                  {
+                                    label:
+                                      "Buka Klip Bersarang (Masuk Sub-Timeline)",
+                                    icon: <Layers size={14} />,
+                                    onClick: () => enterCompoundClip(clip.id),
+                                  },
+                                  {
+                                    label: "Pisahkan Klip Bersarang (Ungroup)",
+                                    icon: <Scissors size={14} />,
+                                    disabled: track.locked,
+                                    onClick: () =>
+                                      ungroupCompoundClip(clip.id),
+                                  },
+                                ]
+                              : activeSelection.length >= 2
+                                ? [
+                                    {
+                                      label:
+                                        "Buat Klip Bersarang (Compound Clip)",
+                                      icon: <Layers size={14} />,
+                                      disabled: track.locked,
+                                      onClick: () =>
+                                        useEditorStore
+                                          .getState()
+                                          .createCompoundClip(activeSelection),
+                                    },
+                                  ]
+                                : []),
                             { divider: true, label: "", onClick: () => {} },
                             {
-                              label: "Pindah ke Trek Video Atas",
+                              label: "Pindah ke Trek Atas",
                               icon: <ArrowUp size={14} />,
                               disabled: track.locked,
                               onClick: () => moveClipVertically(clip, "up"),
                             },
                             {
-                              label: "Pindah ke Trek Video Bawah",
+                              label: "Pindah ke Trek Bawah",
                               icon: <ArrowDown size={14} />,
                               disabled: track.locked,
                               onClick: () => moveClipVertically(clip, "down"),
@@ -2321,15 +2519,30 @@ export default function Timeline(props: TimelineProps) {
                               disabled: track.locked,
                               onClick: () => moveClipToNewTrack(clip),
                             },
+                            ...(!isAdj
+                              ? [
+                                  { divider: true, label: "", onClick: () => {} },
+                                  {
+                                    label: clip.muted
+                                      ? t("timeline.unmute") || "Unmute"
+                                      : t("timeline.mute") || "Mute",
+                                    icon: clip.muted ? (
+                                      <Volume2 size={14} />
+                                    ) : (
+                                      <VolumeX size={14} />
+                                    ),
+                                    disabled: track.locked,
+                                    onClick: () =>
+                                      props.onClipUpdate(clip.id, {
+                                        muted: !clip.muted,
+                                      }),
+                                  },
+                                ]
+                              : []),
                             { divider: true, label: "", onClick: () => {} },
                             {
-                              label: clip.muted ? (t("timeline.unmute") || "Unmute") : (t("timeline.mute") || "Mute"),
-                              icon: clip.muted ? <Volume2 size={14} /> : <VolumeX size={14} />,
-                              disabled: track.locked,
-                              onClick: () => props.onClipUpdate(clip.id, { muted: !clip.muted }),
-                            },
-                            {
-                              label: t("toolbar.rippleDelete") || "Ripple Delete",
+                              label:
+                                t("toolbar.rippleDelete") || "Ripple Delete",
                               shortcut: "Del",
                               danger: true,
                               disabled: track.locked,
@@ -2338,8 +2551,15 @@ export default function Timeline(props: TimelineProps) {
                                 const dur = clip.duration;
                                 const nextClips = p.clips
                                   .filter((c) => c.id !== clip.id)
-                                  .map((c) => c.trackId === clip.trackId && c.start > clip.start ? { ...c, start: c.start - dur } : c);
-                                useEditorStore.getState().commit({ ...p, clips: nextClips });
+                                  .map((c) =>
+                                    c.trackId === clip.trackId &&
+                                    c.start > clip.start
+                                      ? { ...c, start: c.start - dur }
+                                      : c,
+                                  );
+                                useEditorStore
+                                  .getState()
+                                  .commit({ ...p, clips: nextClips });
                               },
                             },
                             {
@@ -2350,25 +2570,8 @@ export default function Timeline(props: TimelineProps) {
                               disabled: track.locked,
                               onClick: () => props.onDelete(),
                             },
-                            { divider: true, label: "", onClick: () => {} },
-                            clip.isCompound
-                              ? {
-                                  label: t("timeline.ungroupCompound") || "Ungroup Compound Clip",
-                                  icon: <Layers size={14} />,
-                                  disabled: track.locked,
-                                  onClick: () => useEditorStore.getState().ungroupCompoundClip(clip.id),
-                                }
-                              : {
-                                  label: t("timeline.createCompound") || "Create Compound Clip",
-                                  icon: <Layers size={14} />,
-                                  disabled: track.locked,
-                                  onClick: () => {
-                                    const ids = selectedIds.includes(clip.id) ? selectedIds : [clip.id];
-                                    useEditorStore.getState().createCompoundClip(ids);
-                                  },
-                                },
                           ];
-                          setContextMenu({ x: e.clientX, y: e.clientY, items });
+                          setContextMenu({ x: clientX, y: clientY, items });
                         }}
                         style={{
                           left: clip.start * pps,
@@ -2449,6 +2652,20 @@ export default function Timeline(props: TimelineProps) {
                           {clip.linkId && <Link2 size={12} aria-label={t("timeline.linkVideoAudio")} />}
                           <span>{clip.name}</span>
                           {clip.isCompound && <span className="tl-compound-badge">Compound</span>}
+                          {clip.isAdjustmentLayer && <span className="tl-adjustment-badge">Adjustment</span>}
+                          {!clip.isAdjustmentLayer &&
+                            (clip.effects?.grain?.enabled ||
+                              clip.effects?.blur?.enabled ||
+                              (clip.effects?.stylize?.enabled &&
+                                ((clip.effects.stylize.vignette ?? 0) > 0 ||
+                                  (clip.effects.stylize.chromaticAberration ?? 0) > 0 ||
+                                  (clip.effects.stylize.scanlines ?? 0) > 0 ||
+                                  (clip.effects.stylize.bloom ?? 0) > 0 ||
+                                  (clip.effects.stylize.sharpen ?? 0) > 0))) && (
+                              <span className="tl-effect-badge" title="Memiliki Efek Aktif">
+                                <Sparkles size={9} /> FX
+                              </span>
+                            )}
                           {clip.speed !== 1 && <b>{clip.speed}×</b>}
                           {(clip.muted || track.muted) && <VolumeX size={12} />}
                         </div>
@@ -2713,8 +2930,8 @@ export default function Timeline(props: TimelineProps) {
             disabled={actionTrack.locked}
             onClick={() => beginRename(actionTrack)}
           >
-            <Pencil size={12} />
-            {t("timeline.renameTrack")}
+            <span className="file-menu-icon"><Pencil size={14} /></span>
+            <span className="file-menu-label">{t("timeline.renameTrack")}</span>
           </button>
           <button
             role="menuitem"
@@ -2729,8 +2946,8 @@ export default function Timeline(props: TimelineProps) {
               setTrackActions(null);
             }}
           >
-            <ArrowUp size={12} />
-            {t("timeline.moveTrackUp")}
+            <span className="file-menu-icon"><ArrowUp size={14} /></span>
+            <span className="file-menu-label">{t("timeline.moveTrackUp")}</span>
           </button>
           <button
             role="menuitem"
@@ -2745,8 +2962,8 @@ export default function Timeline(props: TimelineProps) {
               setTrackActions(null);
             }}
           >
-            <ArrowDown size={12} />
-            {t("timeline.moveTrackDown")}
+            <span className="file-menu-icon"><ArrowDown size={14} /></span>
+            <span className="file-menu-label">{t("timeline.moveTrackDown")}</span>
           </button>
           <div className="tl-menu-divider" />
           <button
@@ -2755,8 +2972,8 @@ export default function Timeline(props: TimelineProps) {
             disabled={actionTrack.locked || !props.onTrackDelete}
             onClick={() => requestTrackDelete(actionTrack)}
           >
-            <Trash2 size={12} />
-            {t("timeline.deleteTrack")}
+            <span className="file-menu-icon"><Trash2 size={14} /></span>
+            <span className="file-menu-label">{t("timeline.deleteTrack")}</span>
           </button>
         </div>
       )}
@@ -2815,7 +3032,7 @@ export default function Timeline(props: TimelineProps) {
           x={contextMenu.x}
           y={contextMenu.y}
           items={contextMenu.items}
-          onClose={() => setContextMenu(null)}
+          onClose={closeContextMenu}
         />
       )}
       {gesture?.kind === "move" &&

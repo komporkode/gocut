@@ -103,12 +103,26 @@ export function GoCutLogoIcon({ size = 22, className = "" }: { size?: number; cl
   );
 }
 
+export interface NewProjectConfig {
+  name: string;
+  width: number;
+  height: number;
+  fps: number;
+}
+
 interface ProjectDashboardProps {
   onOpenProject: (path: string) => void;
-  onNewProject: () => void;
+  onNewProject: (config?: NewProjectConfig) => void;
   onOpenExternalFile?: () => void;
   onDropFiles?: (files: File[], paths?: string[]) => void;
 }
+
+const ASPECT_RATIO_PRESETS = [
+  { id: "16:9", label: "16:9 Landscape", desc: "1920 × 1080 (YouTube / Desktop)", width: 1920, height: 1080 },
+  { id: "9:16", label: "9:16 Vertical", desc: "1080 × 1920 (TikTok / Reels / Shorts)", width: 1080, height: 1920 },
+  { id: "1:1", label: "1:1 Square", desc: "1080 × 1080 (Feed / Carousel)", width: 1080, height: 1080 },
+  { id: "4:5", label: "4:5 Portrait", desc: "1080 × 1350 (Instagram Portrait)", width: 1080, height: 1350 },
+] as const;
 
 export default function ProjectDashboard({
   onOpenProject,
@@ -125,6 +139,10 @@ export default function ProjectDashboard({
   const dragCounter = useRef(0);
 
   // Modals state
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [newProjName, setNewProjName] = useState("");
+  const [newProjAspect, setNewProjAspect] = useState<string>("16:9");
+  const [newProjFps, setNewProjFps] = useState<number>(30);
   const [renameTarget, setRenameTarget] = useState<ProjectInfo | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<ProjectInfo | null>(null);
@@ -159,14 +177,25 @@ export default function ProjectDashboard({
     return filterAndSortProjects(projects, searchQuery, sortMode);
   }, [projects, searchQuery, sortMode]);
 
-  const handleCreateNew = async () => {
-    try {
-      const res = await editorAPI.createProject(t("project.untitled") || "Untitled Project");
-      await loadProjects();
-      onOpenProject(res.path);
-    } catch {
-      onNewProject();
-    }
+  const handleCreateNew = () => {
+    const defaultTitle = t("project.untitled") || "Proyek Tanpa Judul";
+    const nextIdx = projects.length + 1;
+    setNewProjName(`${defaultTitle} ${nextIdx}`);
+    setNewProjAspect("16:9");
+    setNewProjFps(30);
+    setShowNewProjectModal(true);
+  };
+
+  const handleConfirmCreateNew = () => {
+    const preset = ASPECT_RATIO_PRESETS.find((p) => p.id === newProjAspect) ?? ASPECT_RATIO_PRESETS[0];
+    const finalName = newProjName.trim() || t("project.untitled") || "Proyek Tanpa Judul";
+    setShowNewProjectModal(false);
+    onNewProject({
+      name: finalName,
+      width: preset.width,
+      height: preset.height,
+      fps: newProjFps,
+    });
   };
 
   const handleDuplicate = async (path: string) => {
@@ -441,6 +470,123 @@ export default function ProjectDashboard({
           )}
         </section>
       </div>
+
+      {/* New Project Setup Modal */}
+      {showNewProjectModal && (
+        <div className="modal-backdrop" role="presentation" onClick={() => setShowNewProjectModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 460 }}>
+            <header>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Film size={17} style={{ color: "#22d3ee" }} />
+                <h3>{t("toolbar.newProject") || "Buat Proyek Baru"}</h3>
+              </div>
+              <button className="icon-btn" onClick={() => setShowNewProjectModal(false)}>
+                <X size={16} />
+              </button>
+            </header>
+            <div className="modal-body" style={{ padding: "18px 20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#9ca3af", marginBottom: 6 }}>
+                  Nama Proyek
+                </label>
+                <input
+                  type="text"
+                  className="text-input"
+                  autoFocus
+                  placeholder="Proyek Tanpa Judul"
+                  style={{ width: "100%", padding: "10px 12px", background: "#14171f", border: "1px solid #2e3446", color: "#fff", borderRadius: 8, fontSize: 13 }}
+                  value={newProjName}
+                  onChange={(e) => setNewProjName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleConfirmCreateNew();
+                    if (e.key === "Escape") setShowNewProjectModal(false);
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#9ca3af", marginBottom: 8 }}>
+                  Rasio Aspek & Resolusi Kanvas
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {ASPECT_RATIO_PRESETS.map((preset) => {
+                    const active = newProjAspect === preset.id;
+                    return (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => setNewProjAspect(preset.id)}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "flex-start",
+                          gap: 3,
+                          padding: "10px 12px",
+                          borderRadius: 8,
+                          border: active ? "1px solid #06b6d4" : "1px solid rgba(255,255,255,0.08)",
+                          background: active ? "rgba(6, 182, 212, 0.14)" : "rgba(255,255,255,0.03)",
+                          color: "#f4f4f5",
+                          cursor: "pointer",
+                          textAlign: "left",
+                        }}
+                      >
+                        <strong style={{ fontSize: 13, color: active ? "#22d3ee" : "#fff" }}>{preset.label}</strong>
+                        <span style={{ fontSize: 11, color: "#9ca3af" }}>{preset.desc}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#9ca3af", marginBottom: 8 }}>
+                  Frame Rate (FPS)
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+                  {[
+                    { fps: 24, label: "24 FPS", sub: "Cinematic" },
+                    { fps: 30, label: "30 FPS", sub: "Standard" },
+                    { fps: 60, label: "60 FPS", sub: "Smooth" },
+                  ].map((item) => {
+                    const active = newProjFps === item.fps;
+                    return (
+                      <button
+                        key={item.fps}
+                        type="button"
+                        onClick={() => setNewProjFps(item.fps)}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          gap: 2,
+                          padding: "8px 10px",
+                          borderRadius: 8,
+                          border: active ? "1px solid #06b6d4" : "1px solid rgba(255,255,255,0.08)",
+                          background: active ? "rgba(6, 182, 212, 0.14)" : "rgba(255,255,255,0.03)",
+                          color: "#f4f4f5",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <strong style={{ fontSize: 13, color: active ? "#22d3ee" : "#fff" }}>{item.label}</strong>
+                        <span style={{ fontSize: 10, color: "#9ca3af" }}>{item.sub}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+            <footer>
+              <button className="secondary-btn" onClick={() => setShowNewProjectModal(false)}>
+                {t("dialog.cancel") || "Batal"}
+              </button>
+              <button className="primary" onClick={handleConfirmCreateNew}>
+                <Plus size={15} />
+                <span>Buat Proyek</span>
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {/* Rename Modal */}
       {renameTarget && (

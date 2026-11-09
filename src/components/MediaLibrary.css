@@ -367,24 +367,64 @@
 }
 .media-context {
   position: absolute;
-  z-index: 35;
+  z-index: 1000;
   top: calc(100% - 2px);
   right: 0;
-  background: #292f39;
-  border: 1px solid #414a59;
-  border-radius: 7px;
+  background: #202020;
+  border: 1px solid #3c404b;
+  border-radius: 8px;
   padding: 5px;
-  width: 158px;
-  box-shadow: 0 7px 28px #0009;
+  width: 170px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: gocutMenuFadeIn 0.12s ease-out;
+  user-select: none;
 }
 .media-context button {
   width: 100%;
+  display: flex;
+  align-items: center;
   justify-content: flex-start;
-  padding: 9px;
-  font-size: 10px;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  background: transparent;
+  border: none;
+  color: #d1d5db;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.media-context button:hover:not(:disabled),
+.media-context button:focus-visible:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  outline: none;
+}
+.media-context button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 .media-context .media-context-remove {
-  color: #db929a;
+  color: #f87171;
+}
+.media-context .media-context-remove svg {
+  color: #f87171;
+}
+.media-context .media-context-remove:hover:not(:disabled),
+.media-context .media-context-remove:focus-visible:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+.media-context .media-context-remove:hover:not(:disabled) svg,
+.media-context .media-context-remove:focus-visible:not(:disabled) svg {
+  color: #fca5a5;
 }
 .media-list .media-context {
   top: 44px;
@@ -517,15 +557,24 @@
 .media-import { font-size: 11px; }
 /* A local category rail mirrors the desktop library hierarchy on wide panels. */
 .resource-panel { container-type: inline-size; }
+.media-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 @container (min-width: 360px) {
   .media-library {
     display: grid;
     grid-template-columns: 84px minmax(0, 1fr);
-    grid-template-rows: 49px 37px minmax(0, 1fr) 26px;
+    grid-template-rows: 1fr 26px;
   }
   .media-filters {
     grid-column: 1;
-    grid-row: 1 / 4;
+    grid-row: 1;
     align-self: stretch;
     flex-direction: column;
     align-items: stretch;
@@ -537,10 +586,19 @@
   .media-filters button { justify-content: flex-start; min-height: 30px; padding: 6px 10px; font-size: 11px; color: #b6b6b6; }
   .media-filters button.is-active { background: #393939; color: var(--accent); }
   .media-filters button span { margin-left: auto; }
-  .media-top { grid-column: 2; grid-row: 1; padding: 10px 13px; }
-  .media-tools { grid-column: 2; grid-row: 2; margin: 0 13px 8px; }
-  .media-content { grid-column: 2; grid-row: 3; padding: 10px 13px 16px; }
-  .media-footer { grid-column: 1 / 3; grid-row: 4; }
+  .media-main {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .media-top { padding: 10px 13px; }
+  .media-tools { margin: 0 13px 8px; }
+  .media-content { padding: 10px 13px 16px; flex: 1; min-height: 0; overflow-y: auto; }
+  .media-footer { grid-column: 1 / 3; grid-row: 2; }
   .media-grid { grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); }
   .media-top-title { font-size: 11px; }
   .media-top-title svg { display: none; }
@@ -652,32 +710,179 @@
   top: 100%;
   right: 0;
   margin-top: 4px;
-  background: #1e1e24;
-  border: 1px solid #333;
-  border-radius: 6px;
-  padding: 4px;
-  z-index: 50;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  background: #202020;
+  border: 1px solid #3c404b;
+  border-radius: 8px;
+  padding: 5px;
+  z-index: 1000;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
-  min-width: 100px;
+  min-width: 140px;
   gap: 2px;
+  animation: gocutMenuFadeIn 0.12s ease-out;
+  user-select: none;
 }
 .media-folder-menu button {
   background: transparent;
   border: none;
-  color: #ccc;
-  padding: 5px 8px;
-  font-size: 11px;
+  outline: none;
+  color: #d1d5db;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.media-folder-menu button:hover:not(:disabled),
+.media-folder-menu button:focus-visible:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  outline: none;
+}
+.media-folder-menu button.is-danger {
+  color: #f87171;
+}
+.media-folder-menu button.is-danger svg {
+  color: #f87171;
+}
+.media-folder-menu button.is-danger:hover:not(:disabled),
+.media-folder-menu button.is-danger:focus-visible:not(:disabled) {
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+}
+.media-folder-menu button.is-danger:hover:not(:disabled) svg,
+.media-folder-menu button.is-danger:focus-visible:not(:disabled) svg {
+  color: #fca5a5;
+}
+
+.media-import-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: #202020;
+  border: 1px solid #3c404b;
+  border-radius: 8px;
+  padding: 5px;
+  z-index: 1000;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  gap: 2px;
+  animation: gocutMenuFadeIn 0.12s ease-out;
+  user-select: none;
+}
+.media-import-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #d1d5db;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 5px;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.media-import-menu-item:hover:not(:disabled),
+.media-import-menu-item:focus-visible:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  outline: none;
+}
+
+.media-import-progress-banner {
+  margin: 0 13px 8px;
+  padding: 8px 11px;
+  background: linear-gradient(135deg, rgba(6, 182, 212, 0.14), rgba(139, 92, 246, 0.12));
+  border: 1px solid rgba(6, 182, 212, 0.35);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.media-import-progress-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #e4e4e7;
+}
+
+.media-import-progress-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.media-import-progress-bar {
+  width: 45%;
+  height: 100%;
+  background: linear-gradient(90deg, #06b6d4, #8b5cf6, #06b6d4);
+  border-radius: 999px;
+  animation: mediaImportIndeterminate 1.2s ease-in-out infinite;
+}
+
+@keyframes mediaImportIndeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(240%);
+  }
+}
+
+.media-item-skeleton {
+  border: 1px dashed rgba(34, 211, 238, 0.45) !important;
+  background: rgba(6, 182, 212, 0.05) !important;
+  pointer-events: none;
+}
+
+.media-preview-skeleton {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: linear-gradient(110deg, #1a1e26 25%, #232a36 37%, #1a1e26 63%);
+  background-size: 200% 100%;
+  animation: mediaSkeletonShimmer 1.4s ease infinite;
+}
+
+.media-skeleton-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #22d3ee;
+  background: rgba(6, 182, 212, 0.15);
+  padding: 2px 6px;
   border-radius: 4px;
 }
-.media-folder-menu button:hover {
-  background: #2a2a34;
-  color: #fff;
-}
-.media-folder-menu button.is-danger:hover {
-  background: rgba(255, 70, 70, 0.2);
-  color: #ff6666;
+
+@keyframes mediaSkeletonShimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }

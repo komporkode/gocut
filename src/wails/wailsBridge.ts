@@ -11,6 +11,7 @@ import type {
 } from "../core/types";
 import { flattenCompoundClips } from "../core/timelineEdits";
 import { createProject as createCoreProject } from "../core/model";
+import { findBuiltinAsset, builtinAssetUrl } from "../core/builtinAssets";
 import * as App from "../../wailsjs/go/main/App";
 import * as Runtime from "../../wailsjs/runtime/runtime";
 
@@ -26,7 +27,7 @@ export function isWailsEnvironment(): boolean {
 
 export function toMediaStreamUrl(filePathOrUrl: string): string {
   if (!filePathOrUrl) return "";
-  if (filePathOrUrl.startsWith("/media-stream")) return filePathOrUrl;
+  if (filePathOrUrl.startsWith("/media-stream") || filePathOrUrl.startsWith("/media/") || filePathOrUrl.startsWith("/media?")) return filePathOrUrl;
   if (filePathOrUrl.startsWith("blob:") || filePathOrUrl.startsWith("data:")) return filePathOrUrl;
 
   let targetPath = filePathOrUrl;
@@ -76,6 +77,12 @@ export function normalizeProjectAssets(project: Project): Project {
     } else if (asset.url) {
       asset.url = toMediaStreamUrl(asset.url);
     }
+    if (asset.previewUrl) {
+      asset.previewUrl = toMediaStreamUrl(asset.previewUrl);
+    }
+    if (asset.thumbnail && !asset.thumbnail.startsWith("data:")) {
+      asset.thumbnail = toMediaStreamUrl(asset.thumbnail);
+    }
   }
   return project;
 }
@@ -105,8 +112,58 @@ export function createWailsBridge(): EditorAPI {
     packageProject: async () => null,
     cancelPackage: async () => {},
     onPackageProgress: () => () => {},
-    importBuiltinAsset: async (id: string) => {
-      throw new Error(`Builtin asset ${id} not found.`);
+    importBuiltinAsset: async (id: string): Promise<MediaAsset> => {
+      const def = findBuiltinAsset(id);
+      if (!def) {
+        throw new Error(`Builtin asset ${id} not found.`);
+      }
+      const assetUrl = builtinAssetUrl(def);
+      if (isWailsEnvironment()) {
+        try {
+          const resp = await fetch(assetUrl);
+          if (resp.ok) {
+            const buffer = await resp.arrayBuffer();
+            let binary = "";
+            const bytes = new Uint8Array(buffer);
+            const len = bytes.byteLength;
+            for (let i = 0; i < len; i++) {
+              binary += String.fromCharCode(bytes[i]);
+            }
+            const base64Data = typeof window !== "undefined" && window.btoa ? window.btoa(binary) : Buffer.from(buffer).toString("base64");
+            const savedPath = await App.SaveMediaCache(def.fileName, base64Data);
+            if (savedPath) {
+              return {
+                id: `builtin-${def.id}-${Date.now()}`,
+                name: def.name,
+                path: savedPath,
+                url: toMediaStreamUrl(savedPath),
+                kind: def.kind,
+                duration: def.duration || 5,
+                width: def.width || 512,
+                height: def.height || 512,
+                fps: 30,
+                hasAudio: def.kind === "audio",
+                thumbnail: toMediaStreamUrl(savedPath),
+              };
+            }
+          }
+        } catch (e) {
+          console.warn("Wails SaveMediaCache failed for builtin asset:", e);
+        }
+      }
+      return {
+        id: `builtin-${def.id}-${Date.now()}`,
+        name: def.name,
+        path: `/builtin-assets/${def.fileName}`,
+        url: assetUrl,
+        kind: def.kind,
+        duration: def.duration || 5,
+        width: def.width || 512,
+        height: def.height || 512,
+        fps: 30,
+        hasAudio: def.kind === "audio",
+        thumbnail: assetUrl,
+      };
     },
     getAssistantProviders: async () => [],
     chooseAssistantCLI: async () => [],
@@ -128,6 +185,9 @@ export function createWailsBridge(): EditorAPI {
         name: a.name,
         path: a.path,
         url: toMediaStreamUrl(a.path),
+        previewUrl: a.previewUrl ? toMediaStreamUrl(a.previewUrl) : undefined,
+        thumbnail: a.thumbnail ? toMediaStreamUrl(a.thumbnail) : undefined,
+        waveform: a.waveform,
         kind: a.kind as MediaKind,
         duration: a.duration,
         width: a.width,
@@ -172,6 +232,9 @@ export function createWailsBridge(): EditorAPI {
             name: a.name,
             path: a.path,
             url: toMediaStreamUrl(a.path),
+            previewUrl: a.previewUrl ? toMediaStreamUrl(a.previewUrl) : undefined,
+            thumbnail: a.thumbnail ? toMediaStreamUrl(a.thumbnail) : undefined,
+            waveform: a.waveform,
             kind: a.kind as MediaKind,
             duration: a.duration,
             width: a.width,
@@ -318,11 +381,13 @@ export function createWailsBridge(): EditorAPI {
     getRecentProjects: async (): Promise<RecentProject[]> => {
       try {
         const items = await App.GetRecentProjects();
-        return (items || []).map((r) => ({
-          name: r.name,
-          path: r.path,
-          updatedAt: r.updatedAt,
-        }));
+        return (items || [])
+          .filter((r) => r && r.path && !r.path.startsWith("/projects/"))
+          .map((r) => ({
+            name: r.name,
+            path: r.path,
+            updatedAt: r.updatedAt,
+          }));
       } catch {
         return [];
       }
@@ -332,7 +397,9 @@ export function createWailsBridge(): EditorAPI {
       if (isWailsEnvironment()) {
         try {
           const items = await (App as unknown as { ListProjects?: () => Promise<ProjectInfo[]> }).ListProjects?.();
-          if (items) return items;
+          if (items && Array.isArray(items)) {
+            return items.filter((x) => x && x.path && !x.path.startsWith("/projects/"));
+          }
         } catch {
           /* fallback */
         }
@@ -340,7 +407,27 @@ export function createWailsBridge(): EditorAPI {
       return [...mockProjects];
     },
 
-    createProject: async (name: string) => {
+    createProject: async (name = "Untitled Project") => {
+      if (isWailsEnvironment()) {
+        try {
+          const entry = await (App as unknown as { CreateProject: (n: string) => Promise<ProjectInfo> }).CreateProject(name);
+          if (entry && entry.path) {
+            let p = createCoreProject(entry.name || name);
+            p.id = entry.id || p.id;
+            try {
+              const fileRes = await App.OpenProject(entry.path);
+              if (fileRes?.json) {
+                p = normalizeProjectAssets(JSON.parse(fileRes.json) as Project);
+              }
+            } catch {
+              /* ignore */
+            }
+            return { project: p, path: entry.path };
+          }
+        } catch (e) {
+          console.error("Wails CreateProject failed:", e);
+        }
+      }
       const p = createCoreProject(name);
       const safePath = `/projects/${name.replace(/[^\w-]/g, "_")}-${Date.now()}.gct`;
       const info: ProjectInfo = {
@@ -352,17 +439,18 @@ export function createWailsBridge(): EditorAPI {
         updatedAt: new Date().toISOString(),
       };
       mockProjects = [info, ...mockProjects.filter(x => x.path !== safePath)];
-      if (isWailsEnvironment()) {
-        try {
-          await (App as unknown as { CreateProject?: (n: string) => Promise<unknown> }).CreateProject?.(name);
-        } catch {
-          /* ignore */
-        }
-      }
       return { project: p, path: safePath };
     },
 
     duplicateProject: async (path: string): Promise<ProjectInfo> => {
+      if (isWailsEnvironment()) {
+        try {
+          const res = await (App as unknown as { DuplicateProject?: (p: string) => Promise<ProjectInfo> }).DuplicateProject?.(path);
+          if (res && res.path) return res;
+        } catch {
+          /* fallback */
+        }
+      }
       const orig = mockProjects.find(p => p.path === path);
       const newName = orig ? `${orig.name} Copy` : "Duplicated Project Copy";
       const newPath = `/projects/${newName.replace(/[^\w-]/g, "_")}-${Date.now()}.gct`;
@@ -376,30 +464,22 @@ export function createWailsBridge(): EditorAPI {
         updatedAt: new Date().toISOString(),
       };
       mockProjects = [duplicated, ...mockProjects];
-      if (isWailsEnvironment()) {
-        try {
-          const res = await (App as unknown as { DuplicateProject?: (p: string) => Promise<ProjectInfo> }).DuplicateProject?.(path);
-          if (res) return res;
-        } catch {
-          /* fallback */
-        }
-      }
       return duplicated;
     },
 
     renameProject: async (path: string, newName: string): Promise<ProjectInfo> => {
+      if (isWailsEnvironment()) {
+        try {
+          const res = await (App as unknown as { RenameProject?: (p: string, n: string) => Promise<ProjectInfo> }).RenameProject?.(path, newName);
+          if (res && res.path) return res;
+        } catch {
+          /* fallback */
+        }
+      }
       const found = mockProjects.find(p => p.path === path);
       if (found) {
         found.name = newName;
         found.updatedAt = new Date().toISOString();
-      }
-      if (isWailsEnvironment()) {
-        try {
-          const res = await (App as unknown as { RenameProject?: (p: string, n: string) => Promise<ProjectInfo> }).RenameProject?.(path, newName);
-          if (res) return res;
-        } catch {
-          /* fallback */
-        }
       }
       return found || {
         id: "renamed",
@@ -447,7 +527,7 @@ export function createWailsBridge(): EditorAPI {
       };
     },
 
-    chooseExportPath: async (name: string, format: "mp4" | "mov") => {
+    chooseExportPath: async (name: string, format: "mp4" | "mov" | "mp3" | "wav") => {
       try {
         const res = await App.ChooseExportPath(name, format);
         return res || null;
@@ -650,6 +730,69 @@ export function createWailsBridge(): EditorAPI {
 
     importWhisperModel: async () => {
       return await App.ImportWhisperModel();
+    },
+
+    checkForUpdate: async (force: boolean = false) => {
+      try {
+        const res = await App.CheckForUpdate(force);
+        return res || null;
+      } catch {
+        return null;
+      }
+    },
+
+    downloadUpdate: async (downloadUrl: string) => {
+      try {
+        return await App.DownloadUpdate(downloadUrl);
+      } catch {
+        return null;
+      }
+    },
+
+    onUpdateProgress: (callback: (progress: any) => void) => {
+      try {
+        return Runtime.EventsOn("update_progress", (data: any) => {
+          callback(data);
+        });
+      } catch {
+        return () => {};
+      }
+    },
+
+    onUpdateAvailable: (callback: (info: any) => void) => {
+      try {
+        return Runtime.EventsOn("update_available", (data: any) => {
+          callback(data);
+        });
+      } catch {
+        return () => {};
+      }
+    },
+
+    installUpdate: async (installerPath: string) => {
+      try {
+        await App.InstallUpdate(installerPath);
+      } catch {
+        /* ignore in test/mock environment */
+      }
+    },
+
+    getUpdateSettings: async () => {
+      try {
+        return await App.GetUpdateSettings();
+      } catch {
+        return { autoCheck: true, lastChecked: 0 };
+      }
+    },
+
+    setUpdateSettings: async (settings: Partial<{ autoCheck: boolean }>) => {
+      try {
+        if (typeof settings.autoCheck === "boolean") {
+          await App.SetAutoCheckUpdate(settings.autoCheck);
+        }
+      } catch {
+        /* ignore in test/mock environment */
+      }
     },
   };
 }

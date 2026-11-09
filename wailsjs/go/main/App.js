@@ -14,6 +14,10 @@ export function CancelExport(arg1) {
   return window['go']['main']['App']['CancelExport'](arg1);
 }
 
+export function CheckForUpdate(arg1) {
+  return window['go']['main']['App']['CheckForUpdate'](arg1);
+}
+
 export function ChooseCapcutProject(arg1) {
   return window['go']['main']['App']['ChooseCapcutProject'](arg1);
 }
@@ -50,6 +54,10 @@ export function DiscardCapcutProject(arg1) {
   return window['go']['main']['App']['DiscardCapcutProject'](arg1);
 }
 
+export function DownloadUpdate(arg1) {
+  return window['go']['main']['App']['DownloadUpdate'](arg1);
+}
+
 export function DuplicateProject(arg1) {
   return window['go']['main']['App']['DuplicateProject'](arg1);
 }
@@ -78,6 +86,14 @@ export function GetSystemInfo() {
   return window['go']['main']['App']['GetSystemInfo']();
 }
 
+export function GetUpdateSettings() {
+  return window['go']['main']['App']['GetUpdateSettings']();
+}
+
+export function GetWaveform(arg1, arg2) {
+  return window['go']['main']['App']['GetWaveform'](arg1, arg2);
+}
+
 export function ImportMedia(arg1) {
   return window['go']['main']['App']['ImportMedia'](arg1);
 }
@@ -88,6 +104,10 @@ export function ImportWhisperModel() {
 
 export function InspectCapcutPath(arg1) {
   return window['go']['main']['App']['InspectCapcutPath'](arg1);
+}
+
+export function InstallUpdate(arg1) {
+  return window['go']['main']['App']['InstallUpdate'](arg1);
 }
 
 export function ListProjects() {
@@ -140,6 +160,10 @@ export function SaveProjectCover(arg1, arg2) {
 
 export function ScanMediaFolder(arg1) {
   return window['go']['main']['App']['ScanMediaFolder'](arg1);
+}
+
+export function SetAutoCheckUpdate(arg1) {
+  return window['go']['main']['App']['SetAutoCheckUpdate'](arg1);
 }
 
 export function SetDirty(arg1) {

@@ -4,15 +4,18 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"reacut/pkg/cmdutil"
 )
@@ -20,11 +23,45 @@ import (
 type Runner struct {
 	customFfmpeg  string
 	customFfprobe string
+	cacheDir      string
+	tempDir       string
 	jobs          sync.Map // jobId -> context.CancelFunc
 }
 
 func NewRunner() *Runner {
 	return &Runner{}
+}
+
+func (r *Runner) SetDirs(cacheDir, tempDir string) {
+	r.cacheDir = cacheDir
+	r.tempDir = tempDir
+}
+
+func (r *Runner) GetProxyDir() string {
+	if r.cacheDir != "" {
+		dir := filepath.Join(r.cacheDir, "proxies")
+		_ = os.MkdirAll(dir, 0755)
+		return dir
+	}
+	dir := filepath.Join(os.TempDir(), "gocut", "proxies")
+	_ = os.MkdirAll(dir, 0755)
+	return dir
+}
+
+func (r *Runner) GetLogDir() string {
+	if r.tempDir != "" {
+		dir := filepath.Join(r.tempDir, "logs")
+		_ = os.MkdirAll(dir, 0755)
+		return dir
+	}
+	if r.cacheDir != "" {
+		dir := filepath.Join(r.cacheDir, "logs")
+		_ = os.MkdirAll(dir, 0755)
+		return dir
+	}
+	dir := filepath.Join(os.TempDir(), "gocut", "logs")
+	_ = os.MkdirAll(dir, 0755)
+	return dir
 }
 
 func (r *Runner) SetCustomPaths(ffmpeg, ffprobe string) {
@@ -221,7 +258,7 @@ func (r *Runner) EnsureProxy(filePath string, codec string) (string, error) {
 		return "", err
 	}
 
-	cacheDir := filepath.Join(os.TempDir(), "reacut", "proxies")
+	cacheDir := r.GetProxyDir()
 	_ = os.MkdirAll(cacheDir, 0755)
 
 	safeBase := strings.TrimSuffix(filepath.Base(filePath), filepath.Ext(filePath))
@@ -231,24 +268,146 @@ func (r *Runner) EnsureProxy(filePath string, codec string) (string, error) {
 		return proxyPath, nil
 	}
 
+	tmpPath := proxyPath + fmt.Sprintf(".tmp-%d.mp4", time.Now().UnixNano())
+	defer os.Remove(tmpPath)
+
+	// Short GOP (-g 25 -keyint_min 25 -sc_threshold 0) enables instant sub-100ms seeking
 	cmd := exec.Command(ffmpegPath,
 		"-y",
 		"-i", filePath,
 		"-vf", "scale='min(1280,iw)':-2",
 		"-c:v", "libx264",
-		"-preset", "ultrafast",
-		"-crf", "23",
+		"-preset", "veryfast",
+		"-crf", "26",
+		"-g", "25", "-keyint_min", "25", "-sc_threshold", "0",
 		"-c:a", "aac",
 		"-b:a", "128k",
 		"-movflags", "+faststart",
-		proxyPath,
+		tmpPath,
 	)
 	cmdutil.HideWindow(cmd)
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("proxy generation failed: %w", err)
 	}
 
+	_ = os.Remove(proxyPath)
+	if err := os.Rename(tmpPath, proxyPath); err != nil {
+		return "", err
+	}
+
 	return proxyPath, nil
+}
+
+// GenerateThumbnail extracts a lightweight JPEG thumbnail file via FFmpeg.
+func (r *Runner) GenerateThumbnail(filePath string, targetPath string, atSecond float64) error {
+	ffmpegPath, err := r.ResolveTool("ffmpeg")
+	if err != nil {
+		return err
+	}
+	_ = os.MkdirAll(filepath.Dir(targetPath), 0755)
+
+	tmpPath := targetPath + fmt.Sprintf(".tmp-%d.jpg", time.Now().UnixNano())
+	defer os.Remove(tmpPath)
+
+	secStr := fmt.Sprintf("%.2f", atSecond)
+	if atSecond <= 0 {
+		secStr = "0.1"
+	}
+
+	cmd := exec.Command(ffmpegPath,
+		"-y",
+		"-ss", secStr,
+		"-i", filePath,
+		"-vf", "scale='min(320,iw)':-2",
+		"-frames:v", "1",
+		"-q:v", "5",
+		tmpPath,
+	)
+	cmdutil.HideWindow(cmd)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("thumbnail generation failed: %w", err)
+	}
+
+	_ = os.Remove(targetPath)
+	return os.Rename(tmpPath, targetPath)
+}
+
+// ComputeWaveform extracts mono 8kHz PCM raw audio and produces a normalized peak envelope array.
+func (r *Runner) ComputeWaveform(filePath string, buckets int) ([]float32, error) {
+	if buckets <= 0 {
+		buckets = 100
+	}
+	ffmpegPath, err := r.ResolveTool("ffmpeg")
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(ffmpegPath,
+		"-i", filePath,
+		"-vn",
+		"-ac", "1",
+		"-ar", "8000",
+		"-f", "s16le",
+		"-",
+	)
+	cmdutil.HideWindow(cmd)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	var samples []int16
+	buf := make([]byte, 8192)
+	for {
+		n, readErr := stdout.Read(buf)
+		if n > 0 {
+			for i := 0; i+1 < n; i += 2 {
+				val := int16(binary.LittleEndian.Uint16(buf[i : i+2]))
+				samples = append(samples, val)
+			}
+		}
+		if readErr != nil {
+			break
+		}
+	}
+	_ = cmd.Wait()
+
+	if len(samples) == 0 {
+		return make([]float32, buckets), nil
+	}
+
+	peaks := make([]float32, buckets)
+	bucketSize := float64(len(samples)) / float64(buckets)
+	var maxVal float32 = 1.0
+
+	for b := 0; b < buckets; b++ {
+		start := int(float64(b) * bucketSize)
+		end := int(float64(b+1) * bucketSize)
+		if end > len(samples) {
+			end = len(samples)
+		}
+		var maxSample float32 = 0
+		for i := start; i < end; i++ {
+			v := float32(math.Abs(float64(samples[i])))
+			if v > maxSample {
+				maxSample = v
+			}
+		}
+		peaks[b] = maxSample
+		if maxSample > maxVal {
+			maxVal = maxSample
+		}
+	}
+
+	// Normalize peaks to 0.0 - 1.0
+	for b := range peaks {
+		peaks[b] = peaks[b] / maxVal
+	}
+
+	return peaks, nil
 }
 
 
@@ -329,7 +488,7 @@ func (r *Runner) RunExport(
 
 	if err := cmd.Wait(); err != nil {
 		errOutput := strings.TrimSpace(stderrBuf.String())
-		logDetailedFfmpegError(ffmpegPath, args, errOutput)
+		r.logDetailedFfmpegError(ffmpegPath, args, errOutput)
 		if errOutput != "" {
 			cleaned := extractFfmpegErrorMessage(errOutput)
 			if cleaned != "" {
@@ -342,14 +501,8 @@ func (r *Runner) RunExport(
 	return nil
 }
 
-func logDetailedFfmpegError(toolPath string, args []string, stderr string) {
-	appData := os.Getenv("APPDATA")
-	var logDir string
-	if appData != "" {
-		logDir = filepath.Join(appData, "reacut")
-	} else {
-		logDir = filepath.Join(os.TempDir(), "reacut")
-	}
+func (r *Runner) logDetailedFfmpegError(toolPath string, args []string, stderr string) {
+	logDir := r.GetLogDir()
 	_ = os.MkdirAll(logDir, 0755)
 	logFile := filepath.Join(logDir, "export_error.log")
 	content := fmt.Sprintf("=== EXPORT ERROR LOG ===\nTool: %s\nCommand Args:\n%s\n\n=== STDERR OUTPUT ===\n%s\n",

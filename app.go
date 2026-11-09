@@ -20,11 +20,14 @@ import (
 	"reacut/pkg/ffmpeg"
 	"reacut/pkg/media"
 	"reacut/pkg/project"
+	"reacut/pkg/updater"
 	"reacut/pkg/whisper"
 
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+const AppVersion = "0.9.0-beta"
 
 type SystemInfo struct {
 	Ffmpeg        bool   `json:"ffmpeg"`
@@ -41,20 +44,22 @@ type ProjectOpenResult struct {
 }
 
 type MediaAsset struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Path       string  `json:"path"`
-	Url        string  `json:"url"`
-	PreviewUrl string  `json:"previewUrl,omitempty"`
-	Color      string  `json:"color,omitempty"`
-	Kind       string  `json:"kind"`
-	Width      int     `json:"width"`
-	Height     int     `json:"height"`
-	Fps        float64 `json:"fps"`
-	Duration   float64 `json:"duration"`
-	HasAudio   bool    `json:"hasAudio"`
-	Missing    bool    `json:"missing"`
-	Folder     string  `json:"folder,omitempty"`
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	Path       string    `json:"path"`
+	Url        string    `json:"url"`
+	PreviewUrl string    `json:"previewUrl,omitempty"`
+	Thumbnail  string    `json:"thumbnail,omitempty"`
+	Waveform   []float32 `json:"waveform,omitempty"`
+	Color      string    `json:"color,omitempty"`
+	Kind       string    `json:"kind"`
+	Width      int       `json:"width"`
+	Height     int       `json:"height"`
+	Fps        float64   `json:"fps"`
+	Duration   float64   `json:"duration"`
+	HasAudio   bool      `json:"hasAudio"`
+	Missing    bool      `json:"missing"`
+	Folder     string    `json:"folder,omitempty"`
 }
 
 type TextFileResult struct {
@@ -84,29 +89,64 @@ type App struct {
 	runner       *ffmpeg.Runner
 	capcut       *capcut.DraftReader
 	whisperMgr   *whisper.Manager
+	updater      *updater.Manager
 	dirty        bool
 }
 
 func NewApp() *App {
 	sm, _ := project.NewStorageManager()
+	runner := ffmpeg.NewRunner()
+	if sm != nil {
+		runner.SetDirs(sm.GetCacheDir(), sm.GetTempDir())
+		media.SetSolidCacheDir(filepath.Join(sm.GetCacheDir(), "solids"))
+		go sm.CleanupTemp(24 * time.Hour)
+	}
+	var dataDir string
+	if sm != nil {
+		dataDir = sm.GetDataDir()
+	}
+	var whisperDir string
+	if sm != nil {
+		whisperDir = sm.GetModelsDir("whisper")
+	}
 	return &App{
 		mediaHandler: media.NewMediaHandler(),
 		storage:      sm,
-		runner:       ffmpeg.NewRunner(),
+		runner:       runner,
 		capcut:       capcut.NewDraftReader(),
-		whisperMgr:   whisper.NewManager(sm.GetModelsDir("whisper")),
+		whisperMgr:   whisper.NewManager(whisperDir),
+		updater:      updater.NewManager(dataDir),
 	}
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// Pemeriksaan pembaruan berkala di latar belakang (maks. 1x per 24 jam bila aktif)
+	go func() {
+		time.Sleep(3 * time.Second)
+		if a.updater == nil {
+			return
+		}
+		settings := a.updater.GetSettings()
+		if !settings.AutoCheck {
+			return
+		}
+		if time.Now().Unix()-settings.LastChecked < 24*3600 {
+			return
+		}
+		info, err := a.updater.CheckForUpdate(AppVersion, false)
+		if err == nil && info != nil && info.Available {
+			runtime.EventsEmit(a.ctx, "update_available", info)
+		}
+	}()
 }
 
 func (a *App) GetSystemInfo() SystemInfo {
 	ffmpegPath, ffmpegErr := a.runner.ResolveTool("ffmpeg")
 	ffprobePath, ffprobeErr := a.runner.ResolveTool("ffprobe")
 
-	version := "0.8.0-beta (GoCut/Wails/Go)"
+	version := AppVersion + " (GoCut/Wails/Go)"
 	var ffmpegVer string
 	if ffmpegErr == nil {
 		cmd := exec.Command(ffmpegPath, "-version")
@@ -300,41 +340,62 @@ func (a *App) createAssetFromPath(clean string, folder string) MediaAsset {
 
 	if isImage {
 		return MediaAsset{
-			ID:       uuid.NewString(),
-			Name:     name,
-			Path:     clean,
-			Url:      streamUrl,
-			Kind:     "image",
-			Width:    1920,
-			Height:   1080,
-			Fps:      0,
-			Duration: 5,
-			HasAudio: false,
-			Folder:   folder,
+			ID:        uuid.NewString(),
+			Name:      name,
+			Path:      clean,
+			Url:       streamUrl,
+			Thumbnail: streamUrl,
+			Kind:      "image",
+			Width:     1920,
+			Height:    1080,
+			Fps:       0,
+			Duration:  5,
+			HasAudio:  false,
+			Folder:    folder,
 		}
 	}
 
 	probe, err := a.runner.Probe(clean)
 	if err != nil {
 		return MediaAsset{
-			ID:       uuid.NewString(),
-			Name:     name,
-			Path:     clean,
-			Url:      streamUrl,
-			Kind:     "video",
-			Width:    1920,
-			Height:   1080,
-			Fps:      30,
-			Duration: 10,
-			HasAudio: true,
-			Folder:   folder,
+			ID:        uuid.NewString(),
+			Name:      name,
+			Path:      clean,
+			Url:       streamUrl,
+			Thumbnail: streamUrl,
+			Kind:      "video",
+			Width:     1920,
+			Height:    1080,
+			Fps:       30,
+			Duration:  10,
+			HasAudio:  true,
+			Folder:    folder,
 		}
 	}
 
 	previewUrl := streamUrl
+	var thumbUrl string
+
 	if probe.Kind == "video" {
 		if proxyPath, err := a.runner.EnsureProxy(clean, probe.Codec); err == nil && proxyPath != "" {
 			previewUrl = fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(proxyPath))
+		}
+		// Extract lightweight JPEG thumbnail file (O(1) RAM, served via HTTP Range / media-stream)
+		thumbDir := filepath.Join(a.storage.GetCacheDir(), "thumbnails")
+		_ = os.MkdirAll(thumbDir, 0755)
+		safeBase := strings.TrimSuffix(name, filepath.Ext(name))
+		thumbPath := filepath.Join(thumbDir, fmt.Sprintf("%s_%x.jpg", safeBase, len(clean)+int(clean[0])))
+		if info, err := os.Stat(thumbPath); err == nil && info.Size() > 100 {
+			thumbUrl = fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(thumbPath))
+		} else if err := a.runner.GenerateThumbnail(clean, thumbPath, 0.1); err == nil {
+			thumbUrl = fmt.Sprintf("/media-stream?path=%s", url.QueryEscape(thumbPath))
+		}
+	}
+
+	var waveform []float32
+	if probe.HasAudio {
+		if wf, err := a.runner.ComputeWaveform(clean, 100); err == nil {
+			waveform = wf
 		}
 	}
 
@@ -344,6 +405,8 @@ func (a *App) createAssetFromPath(clean string, folder string) MediaAsset {
 		Path:       clean,
 		Url:        streamUrl,
 		PreviewUrl: previewUrl,
+		Thumbnail:  thumbUrl,
+		Waveform:   waveform,
 		Kind:       probe.Kind,
 		Width:      probe.Width,
 		Height:     probe.Height,
@@ -352,6 +415,17 @@ func (a *App) createAssetFromPath(clean string, folder string) MediaAsset {
 		HasAudio:   probe.HasAudio,
 		Folder:     folder,
 	}
+}
+
+func (a *App) GetWaveform(filePath string, buckets int) ([]float32, error) {
+	clean := media.NormalizePath(filePath)
+	if resolved, err := media.ResolvePath(clean); err == nil && resolved != "" {
+		clean = resolved
+	}
+	if buckets <= 0 {
+		buckets = 500
+	}
+	return a.runner.ComputeWaveform(clean, buckets)
 }
 
 func (a *App) ScanMediaFolder(folderPath string) ([]MediaAsset, error) {
@@ -615,12 +689,16 @@ type ExportTextClip struct {
 	StrokeWidth float64
 }
 
-func createAssSubtitleFile(clips []ExportTextClip, outWidth, outHeight, projWidth, projHeight int) (string, error) {
+func createAssSubtitleFile(clips []ExportTextClip, outWidth, outHeight, projWidth, projHeight int, tempDir string) (string, error) {
 	if len(clips) == 0 {
 		return "", nil
 	}
 
-	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("gocut_sub_%d.ass", time.Now().UnixNano()))
+	if tempDir == "" {
+		tempDir = os.TempDir()
+	}
+	_ = os.MkdirAll(tempDir, 0755)
+	tempFile := filepath.Join(tempDir, fmt.Sprintf("gocut_sub_%d.ass", time.Now().UnixNano()))
 	var b strings.Builder
 
 	b.WriteString("[Script Info]\n")
@@ -674,6 +752,124 @@ func createAssSubtitleFile(clips []ExportTextClip, outWidth, outHeight, projWidt
 	return tempFile, nil
 }
 
+type ExportClipEffects struct {
+	Grain *struct {
+		Enabled             bool    `json:"enabled"`
+		Preset              string  `json:"preset"`
+		Engine              string  `json:"engine"`
+		Movement            string  `json:"movement"`
+		Intensity           float64 `json:"intensity"`
+		GrainSize           string  `json:"grainSize"`
+		HighlightProtection bool    `json:"highlightProtection"`
+		ChromaticDispersion bool    `json:"chromaticDispersion"`
+	} `json:"grain"`
+	Blur *struct {
+		Enabled bool    `json:"enabled"`
+		Type    string  `json:"type"`
+		Radius  float64 `json:"radius"`
+		Angle   float64 `json:"angle"`
+	} `json:"blur"`
+	Stylize *struct {
+		Enabled             bool    `json:"enabled"`
+		Vignette            float64 `json:"vignette"`
+		ChromaticAberration float64 `json:"chromaticAberration"`
+		Scanlines           float64 `json:"scanlines"`
+		Bloom               float64 `json:"bloom"`
+		Sharpen             float64 `json:"sharpen"`
+	} `json:"stylize"`
+}
+
+func ffmpegBlendMode(mode string) string {
+	switch mode {
+	case "screen":
+		return "screen"
+	case "multiply":
+		return "multiply"
+	case "overlay":
+		return "overlay"
+	case "soft-light":
+		return "softlight"
+	case "hard-light":
+		return "hardlight"
+	case "color-dodge":
+		return "dodge"
+	default:
+		return ""
+	}
+}
+
+func buildClipEffectFilters(blurAdj float64, eff *ExportClipEffects) []string {
+	var filters []string
+	if blurAdj > 0 {
+		filters = append(filters, fmt.Sprintf("gblur=sigma=%.2f", blurAdj))
+	}
+	if eff == nil {
+		return filters
+	}
+	if eff.Blur != nil && eff.Blur.Enabled && eff.Blur.Radius > 0 {
+		r := eff.Blur.Radius
+		if r > 50 {
+			r = 50
+		}
+		if eff.Blur.Type == "motion" {
+			angle := int(math.Mod(eff.Blur.Angle, 360))
+			if angle < 0 {
+				angle += 360
+			}
+			filters = append(filters, fmt.Sprintf("dblur=angle=%d:radius=%.1f", angle, r))
+		} else {
+			filters = append(filters, fmt.Sprintf("gblur=sigma=%.2f", r*0.75))
+		}
+	}
+	if eff.Stylize != nil && eff.Stylize.Enabled {
+		if eff.Stylize.ChromaticAberration > 0 {
+			shift := int(math.Round(eff.Stylize.ChromaticAberration))
+			if shift < 1 {
+				shift = 1
+			} else if shift > 32 {
+				shift = 32
+			}
+			filters = append(filters, fmt.Sprintf("rgbashift=rh=-%d:bh=%d", shift, shift))
+		}
+		if eff.Stylize.Sharpen > 0 {
+			amt := (eff.Stylize.Sharpen / 100.0) * 1.8
+			if amt < 0.1 {
+				amt = 0.1
+			} else if amt > 2.5 {
+				amt = 2.5
+			}
+			filters = append(filters, fmt.Sprintf("unsharp=5:5:%.2f:5:5:0.0", amt))
+		}
+		if eff.Stylize.Bloom > 0 {
+			b := (eff.Stylize.Bloom / 100.0) * 0.12
+			filters = append(filters, fmt.Sprintf("eq=brightness=%.3f:saturation=1.06", b))
+		}
+		if eff.Stylize.Vignette > 0 {
+			angle := (eff.Stylize.Vignette / 100.0) * (math.Pi / 3.5)
+			if angle < 0.08 {
+				angle = 0.08
+			} else if angle > 1.2 {
+				angle = 1.2
+			}
+			filters = append(filters, fmt.Sprintf("vignette=angle=%.3f", angle))
+		}
+	}
+	if eff.Grain != nil && eff.Grain.Enabled && eff.Grain.Intensity > 0 {
+		alls := int(math.Round(eff.Grain.Intensity * 0.42))
+		if alls < 1 {
+			alls = 1
+		} else if alls > 65 {
+			alls = 65
+		}
+		flags := "u"
+		if eff.Grain.Movement == "dynamic" {
+			flags = "t+u"
+		}
+		filters = append(filters, fmt.Sprintf("noise=alls=%d:allf=%s", alls, flags))
+	}
+	return filters
+}
+
 func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, float64, []string, error) {
 	var proj struct {
 		Name       string       `json:"name"`
@@ -683,21 +879,23 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		Background string       `json:"background"`
 		Assets     []MediaAsset `json:"assets"`
 		Clips      []struct {
-			ID          string  `json:"id"`
-			TrackID     string  `json:"trackId"`
-			AssetID     string  `json:"assetId"`
-			Name        string  `json:"name"`
-			Start       float64 `json:"start"`
-			Duration    float64 `json:"duration"`
-			SourceIn    float64 `json:"sourceIn"`
-			Speed       float64 `json:"speed"`
-			Volume      float64 `json:"volume"`
-			Muted       bool    `json:"muted"`
-			FadeIn       float64 `json:"fadeIn"`
-			FadeOut      float64 `json:"fadeOut"`
-			AudioFadeIn  float64 `json:"audioFadeIn"`
-			AudioFadeOut float64 `json:"audioFadeOut"`
-			Transform   *struct {
+			ID                string  `json:"id"`
+			TrackID           string  `json:"trackId"`
+			AssetID           string  `json:"assetId"`
+			Name              string  `json:"name"`
+			Start             float64 `json:"start"`
+			Duration          float64 `json:"duration"`
+			SourceIn          float64 `json:"sourceIn"`
+			Speed             float64 `json:"speed"`
+			Volume            float64 `json:"volume"`
+			Muted             bool    `json:"muted"`
+			FadeIn            float64 `json:"fadeIn"`
+			FadeOut           float64 `json:"fadeOut"`
+			AudioFadeIn       float64 `json:"audioFadeIn"`
+			AudioFadeOut      float64 `json:"audioFadeOut"`
+			BlendMode         string  `json:"blendMode"`
+			IsAdjustmentLayer bool    `json:"isAdjustmentLayer"`
+			Transform         *struct {
 				X        float64 `json:"x"`
 				Y        float64 `json:"y"`
 				Scale    float64 `json:"scale"`
@@ -713,7 +911,8 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 				Temperature float64 `json:"temperature"`
 				Blur        float64 `json:"blur"`
 			} `json:"adjustments"`
-			Text *struct {
+			Effects *ExportClipEffects `json:"effects"`
+			Text    *struct {
 				Text        string  `json:"text"`
 				FontSize    float64 `json:"fontSize"`
 				FontFamily  string  `json:"fontFamily"`
@@ -731,6 +930,7 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 			Name   string `json:"name"`
 			Muted  bool   `json:"muted"`
 			Hidden bool   `json:"hidden"`
+			Solo   bool   `json:"solo"`
 		} `json:"tracks"`
 		Transitions []struct {
 			ID         string  `json:"id"`
@@ -749,6 +949,7 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		Path       string  `json:"path"`
 		OutputPath string  `json:"outputPath"`
 		Format     string  `json:"format"`
+		Codec      string  `json:"codec"`
 		Duration   float64 `json:"duration"`
 		Width      int     `json:"width"`
 		Height     int     `json:"height"`
@@ -799,14 +1000,26 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		Name   string
 		Muted  bool
 		Hidden bool
+		Solo   bool
 	}
 	trackMeta := make(map[string]TrackMeta)
+	hasSoloVisual := false
+	hasSoloAudio := false
 	for _, tr := range proj.Tracks {
 		trackMeta[tr.ID] = TrackMeta{
 			Kind:   tr.Kind,
 			Name:   tr.Name,
 			Muted:  tr.Muted,
 			Hidden: tr.Hidden,
+			Solo:   tr.Solo,
+		}
+		if tr.Solo {
+			if tr.Kind != "audio" {
+				hasSoloVisual = true
+			}
+			if tr.Kind == "audio" || tr.Kind == "video" {
+				hasSoloAudio = true
+			}
 		}
 	}
 
@@ -858,24 +1071,27 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 	}
 
 	type VisualClip struct {
-		ID          string
-		TrackID     string
-		Path        string
-		Start       float64
-		Duration    float64
-		SourceIn    float64
-		Speed       float64
-		Kind        string
-		TrackOrder  int
-		X           float64
-		Y           float64
-		Scale       float64
-		Rotation    float64
-		Brightness  float64
-		Contrast    float64
-		Saturation  float64
-		FadeIn      float64
-		FadeOut     float64
+		ID                string
+		TrackID           string
+		Path              string
+		Start             float64
+		Duration          float64
+		SourceIn          float64
+		Speed             float64
+		Kind              string
+		TrackOrder        int
+		X                 float64
+		Y                 float64
+		Scale             float64
+		Rotation          float64
+		Brightness        float64
+		Contrast          float64
+		Saturation        float64
+		FadeIn            float64
+		FadeOut           float64
+		BlendMode         string
+		IsAdjustmentLayer bool
+		EffectFilters     []string
 	}
 
 	type AudioClip struct {
@@ -893,12 +1109,14 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 	var visualClips []VisualClip
 	var audioClips []AudioClip
 	var textClips []ExportTextClip
+	mediaInputCount := 0
 
 	for _, c := range proj.Clips {
 		tm, hasTrack := trackMeta[c.TrackID]
+		isTrackVisualVisible := (!hasTrack || !tm.Hidden) && (!hasSoloVisual || (hasTrack && tm.Solo))
 
 		// Handle Text / Subtitle clips
-		if c.Text != nil && c.Text.Text != "" && (!hasTrack || !tm.Hidden) {
+		if c.Text != nil && c.Text.Text != "" && isTrackVisualVisible {
 			posX := 0.0
 			posY := 0.0
 			if c.Transform != nil {
@@ -917,6 +1135,43 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 				Stroke:      c.Text.Stroke,
 				StrokeWidth: c.Text.StrokeWidth,
 			})
+			continue
+		}
+
+		// Handle Adjustment Layer clips (no asset file required)
+		if c.IsAdjustmentLayer {
+			if isTrackVisualVisible {
+				b := 0.0
+				contrast := 1.0
+				sat := 1.0
+				blurAdj := 0.0
+				if c.Adjustments != nil {
+					b = c.Adjustments.Brightness
+					if c.Adjustments.Contrast > 0 {
+						contrast = c.Adjustments.Contrast
+					}
+					if c.Adjustments.Saturation >= 0 {
+						sat = c.Adjustments.Saturation
+					}
+					blurAdj = c.Adjustments.Blur
+				}
+				effFilters := buildClipEffectFilters(blurAdj, c.Effects)
+				visualClips = append(visualClips, VisualClip{
+					ID:                c.ID,
+					TrackID:           c.TrackID,
+					Start:             c.Start,
+					Duration:          c.Duration,
+					Speed:             1.0,
+					Kind:              "adjustment",
+					TrackOrder:        trackOrder[c.TrackID],
+					Scale:             1.0,
+					Brightness:        b,
+					Contrast:          contrast,
+					Saturation:        sat,
+					IsAdjustmentLayer: true,
+					EffectFilters:     effFilters,
+				})
+			}
 			continue
 		}
 
@@ -941,7 +1196,7 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		}
 
 		// Visual inclusion (video or image)
-		isVisual := (as.Kind == "video" || as.Kind == "image") && (!hasTrack || !tm.Hidden)
+		isVisual := (as.Kind == "video" || as.Kind == "image") && isTrackVisualVisible
 		if isVisual {
 			posX := 0.0
 			posY := 0.0
@@ -958,6 +1213,7 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 			b := 0.0
 			contrast := 1.0
 			sat := 1.0
+			blurAdj := 0.0
 			if c.Adjustments != nil {
 				b = c.Adjustments.Brightness
 				if c.Adjustments.Contrast > 0 {
@@ -966,32 +1222,37 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 				if c.Adjustments.Saturation >= 0 {
 					sat = c.Adjustments.Saturation
 				}
+				blurAdj = c.Adjustments.Blur
 			}
+			effFilters := buildClipEffectFilters(blurAdj, c.Effects)
 
 			visualClips = append(visualClips, VisualClip{
-				ID:         c.ID,
-				TrackID:    c.TrackID,
-				Path:       clipPath,
-				Start:      c.Start,
-				Duration:   c.Duration,
-				SourceIn:   c.SourceIn,
-				Speed:      speed,
-				Kind:       as.Kind,
-				TrackOrder: trackOrder[c.TrackID],
-				X:          posX,
-				Y:          posY,
-				Scale:      scale,
-				Rotation:   rot,
-				Brightness: b,
-				Contrast:   contrast,
-				Saturation: sat,
-				FadeIn:     c.FadeIn,
-				FadeOut:    c.FadeOut,
+				ID:            c.ID,
+				TrackID:       c.TrackID,
+				Path:          clipPath,
+				Start:         c.Start,
+				Duration:      c.Duration,
+				SourceIn:      c.SourceIn,
+				Speed:         speed,
+				Kind:          as.Kind,
+				TrackOrder:    trackOrder[c.TrackID],
+				X:             posX,
+				Y:             posY,
+				Scale:         scale,
+				Rotation:      rot,
+				Brightness:    b,
+				Contrast:      contrast,
+				Saturation:    sat,
+				FadeIn:        c.FadeIn,
+				FadeOut:       c.FadeOut,
+				BlendMode:     c.BlendMode,
+				EffectFilters: effFilters,
 			})
+			mediaInputCount++
 		}
 
 		// Audio inclusion
-		isAudioMuted := c.Muted || (hasTrack && tm.Muted)
+		isAudioMuted := c.Muted || (hasTrack && tm.Muted) || (hasSoloAudio && (!hasTrack || !tm.Solo))
 		if !isAudioMuted {
 			hasAudioStream := as.Kind == "audio" || (hasTrack && tm.Kind == "audio") || (as.Kind == "video" && as.HasAudio)
 			if hasAudioStream {
@@ -1037,6 +1298,8 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 		}
 	}
 
+	isAudioOnly := opts.Format == "mp3" || opts.Format == "wav"
+
 	var args []string
 	args = append(args, "-y")
 
@@ -1044,166 +1307,210 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 	var currentBase string
 	var audioStartIdx int
 
-	// Detect if project is a simple sequence of adjacent full-frame clips without complex visual transforms
-	isSimpleSequential := len(visualClips) > 0 && len(proj.Transitions) == 0
-	if isSimpleSequential {
-		var expectedStart float64 = 0.0
-		for _, vc := range visualClips {
-			if math.Abs(vc.Scale-1.0) > 0.001 || vc.X != 0 || vc.Y != 0 || vc.Rotation != 0 ||
-				vc.Brightness != 0 || vc.Contrast != 1 || vc.Saturation != 1 ||
-				vc.FadeIn != 0 || vc.FadeOut != 0 || vc.Speed != 1.0 {
-				isSimpleSequential = false
-				break
-			}
-			if math.Abs(vc.Start-expectedStart) > 0.05 {
-				isSimpleSequential = false
-				break
-			}
-			expectedStart = vc.Start + vc.Duration
-		}
-		// Visual clips must cover the entire export duration
-		if math.Abs(expectedStart-dur) > 0.1 {
-			isSimpleSequential = false
-		}
-	}
-
-	if isSimpleSequential {
-		for i, vc := range visualClips {
-			inIdx := i
-			durSec := vc.Duration * vc.Speed
-			if vc.Kind == "image" {
-				args = append(args, "-loop", "1", "-t", fmt.Sprintf("%.3f", vc.Duration), "-i", vc.Path)
-			} else {
-				args = append(args, "-ss", fmt.Sprintf("%.3f", vc.SourceIn), "-t", fmt.Sprintf("%.3f", durSec), "-i", vc.Path)
-			}
-
-			clipTag := fmt.Sprintf("v%d", inIdx)
-			filterComplex = append(filterComplex, fmt.Sprintf("[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=%.2f,format=yuv420p[%s]",
-				inIdx, outWidth, outHeight, outWidth, outHeight, fps, clipTag))
-		}
-
-		if len(visualClips) > 1 {
-			var concatInputs []string
-			for i := range visualClips {
-				concatInputs = append(concatInputs, fmt.Sprintf("[v%d]", i))
-			}
-			filterComplex = append(filterComplex, fmt.Sprintf("%sconcat=n=%d:v=1:a=0[vconcat]", strings.Join(concatInputs, ""), len(visualClips)))
-			currentBase = "[vconcat]"
-		} else {
-			currentBase = "[v0]"
-		}
-
-		audioStartIdx = len(visualClips)
+	if isAudioOnly {
+		audioStartIdx = 0
 	} else {
-		bg := "black"
-		if proj.Background != "" && proj.Background != "transparent" {
-			bg = proj.Background
-			if strings.HasPrefix(bg, "#") {
-				bg = "0x" + bg[1:]
-			}
-		}
-		args = append(args, "-f", "lavfi", "-i", fmt.Sprintf("color=c=%s:s=%dx%d:r=%.2f:d=%.2f", bg, outWidth, outHeight, fps, dur))
-
-		currentBase = "[0:v]"
-		ratioX := float64(outWidth) / float64(proj.Width)
-		ratioY := float64(outHeight) / float64(proj.Height)
-
-		for i, vc := range visualClips {
-			inIdx := i + 1
-			durSec := vc.Duration * vc.Speed
-			if vc.Kind == "image" {
-				args = append(args, "-loop", "1", "-t", fmt.Sprintf("%.3f", vc.Duration), "-i", vc.Path)
-			} else {
-				args = append(args, "-ss", fmt.Sprintf("%.3f", vc.SourceIn), "-t", fmt.Sprintf("%.3f", durSec), "-i", vc.Path)
-			}
-
-			clipTag := fmt.Sprintf("v%d", inIdx)
-
-			// Calculate scaled clip width and height
-			clipW := int(float64(outWidth) * vc.Scale)
-			clipH := int(float64(outHeight) * vc.Scale)
-			if clipW%2 != 0 {
-				clipW++
-			}
-			if clipH%2 != 0 {
-				clipH++
-			}
-
-			// Calculate position overlay offset
-			posX := (outWidth-clipW)/2 + int(vc.X*ratioX)
-			posY := (outHeight-clipH)/2 + int(vc.Y*ratioY)
-
-			var clipFilters []string
-			clipFilters = append(clipFilters, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2", clipW, clipH))
-			clipFilters = append(clipFilters, fmt.Sprintf("pad=%d:%d:(ow-iw)/2:(oh-ih)/2", clipW, clipH))
-
-			// Color adjustments
-			if vc.Brightness != 0 || vc.Contrast != 1 || vc.Saturation != 1 {
-				clipFilters = append(clipFilters, fmt.Sprintf("eq=brightness=%.2f:contrast=%.2f:saturation=%.2f", vc.Brightness, vc.Contrast, vc.Saturation))
-			}
-
-			// Fade In / Out
-			if vc.FadeIn > 0 {
-				clipFilters = append(clipFilters, fmt.Sprintf("fade=t=in:st=0:d=%.3f:alpha=1", vc.FadeIn))
-			}
-			if vc.FadeOut > 0 {
-				st := vc.Duration - vc.FadeOut
-				if st < 0 {
-					st = 0
-				}
-				clipFilters = append(clipFilters, fmt.Sprintf("fade=t=out:st=%.3f:d=%.3f:alpha=1", st, vc.FadeOut))
-			}
-
-			// Rotation
-			if vc.Rotation != 0 {
-				clipFilters = append(clipFilters, fmt.Sprintf("rotate=%.4f*PI/180:fillcolor=none:ow='hypot(iw,ih)':oh='hypot(iw,ih)'", vc.Rotation))
-			}
-
-			clipFilters = append(clipFilters, "setsar=1", "format=rgba")
-			clipFilters = append(clipFilters, fmt.Sprintf("setpts=PTS-STARTPTS+%.3f/TB", vc.Start))
-
-			filterComplex = append(filterComplex, fmt.Sprintf("[%d:v]%s[%s]", inIdx, strings.Join(clipFilters, ","), clipTag))
-
-			xExpr := fmt.Sprintf("%d", posX)
-			yExpr := fmt.Sprintf("%d", posY)
-
-			for _, tr := range proj.Transitions {
-				if tr.ToClipID == vc.ID && tr.Duration > 0 {
-					tEnd := vc.Start + tr.Duration
-					switch tr.Type {
-					case "slide-left":
-						xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
-					case "slide-right":
-						xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
-					case "slide-up":
-						yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
-					case "slide-down":
-						yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
-					}
+		// Detect if project is a simple sequence of adjacent full-frame clips without complex visual transforms
+		isSimpleSequential := len(visualClips) > 0 && len(proj.Transitions) == 0
+		if isSimpleSequential {
+			var expectedStart float64 = 0.0
+			for _, vc := range visualClips {
+				if vc.IsAdjustmentLayer || len(vc.EffectFilters) > 0 || (vc.BlendMode != "" && vc.BlendMode != "normal") ||
+					math.Abs(vc.Scale-1.0) > 0.001 || vc.X != 0 || vc.Y != 0 || vc.Rotation != 0 ||
+					vc.Brightness != 0 || vc.Contrast != 1 || vc.Saturation != 1 ||
+					vc.FadeIn != 0 || vc.FadeOut != 0 || vc.Speed != 1.0 {
+					isSimpleSequential = false
 					break
 				}
+				if math.Abs(vc.Start-expectedStart) > 0.05 {
+					isSimpleSequential = false
+					break
+				}
+				expectedStart = vc.Start + vc.Duration
 			}
-
-			nextBase := fmt.Sprintf("[base%d]", inIdx)
-			filterComplex = append(filterComplex, fmt.Sprintf("%s[%s]overlay=x='%s':y='%s':enable='between(t,%.3f,%.3f)'%s", currentBase, clipTag, xExpr, yExpr, vc.Start, vc.Start+vc.Duration, nextBase))
-			currentBase = nextBase
+			// Visual clips must cover the entire export duration
+			if math.Abs(expectedStart-dur) > 0.1 {
+				isSimpleSequential = false
+			}
 		}
 
-		audioStartIdx = len(visualClips) + 1
-	}
+		if isSimpleSequential {
+			for i, vc := range visualClips {
+				inIdx := i
+				durSec := vc.Duration * vc.Speed
+				if vc.Kind == "image" {
+					args = append(args, "-loop", "1", "-t", fmt.Sprintf("%.3f", vc.Duration), "-i", vc.Path)
+				} else {
+					args = append(args, "-ss", fmt.Sprintf("%.3f", vc.SourceIn), "-t", fmt.Sprintf("%.3f", durSec), "-i", vc.Path)
+				}
 
-	// Render Text & Subtitle Clips via ASS subtitles filter if any exist
-	if len(textClips) > 0 {
-		assPath, err := createAssSubtitleFile(textClips, outWidth, outHeight, proj.Width, proj.Height)
-		if err == nil && assPath != "" {
-			// Schedule cleanup of temporary ASS file after 15 minutes
-			time.AfterFunc(15*time.Minute, func() {
-				_ = os.Remove(assPath)
-			})
-			escapedAss := strings.ReplaceAll(filepath.ToSlash(assPath), ":", "\\:")
-			nextBase := "[with_subtitles]"
-			filterComplex = append(filterComplex, fmt.Sprintf("%ssubtitles=filename='%s'%s", currentBase, escapedAss, nextBase))
-			currentBase = nextBase
+				clipTag := fmt.Sprintf("v%d", inIdx)
+				filterComplex = append(filterComplex, fmt.Sprintf("[%d:v]scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=%.2f,format=yuv420p[%s]",
+					inIdx, outWidth, outHeight, outWidth, outHeight, fps, clipTag))
+			}
+
+			if len(visualClips) > 1 {
+				var concatInputs []string
+				for i := range visualClips {
+					concatInputs = append(concatInputs, fmt.Sprintf("[v%d]", i))
+				}
+				filterComplex = append(filterComplex, fmt.Sprintf("%sconcat=n=%d:v=1:a=0[vconcat]", strings.Join(concatInputs, ""), len(visualClips)))
+				currentBase = "[vconcat]"
+			} else {
+				currentBase = "[v0]"
+			}
+
+			audioStartIdx = len(visualClips)
+		} else {
+			bg := "black"
+			if proj.Background != "" && proj.Background != "transparent" {
+				bg = proj.Background
+				if strings.HasPrefix(bg, "#") {
+					bg = "0x" + bg[1:]
+				}
+			}
+			args = append(args, "-f", "lavfi", "-i", fmt.Sprintf("color=c=%s:s=%dx%d:r=%.2f:d=%.2f", bg, outWidth, outHeight, fps, dur))
+
+			currentBase = "[0:v]"
+			ratioX := float64(outWidth) / float64(proj.Width)
+			ratioY := float64(outHeight) / float64(proj.Height)
+
+			mediaInIdx := 0
+			for i, vc := range visualClips {
+				if vc.IsAdjustmentLayer {
+					var adjFilters []string
+					if vc.Brightness != 0 || vc.Contrast != 1 || vc.Saturation != 1 {
+						adjFilters = append(adjFilters, fmt.Sprintf("eq=brightness=%.2f:contrast=%.2f:saturation=%.2f", vc.Brightness, vc.Contrast, vc.Saturation))
+					}
+					adjFilters = append(adjFilters, vc.EffectFilters...)
+					if len(adjFilters) > 0 {
+						rawTag := fmt.Sprintf("[adj_raw_%d]", i)
+						modTag := fmt.Sprintf("[adj_mod_%d]", i)
+						fltTag := fmt.Sprintf("[adj_flt_%d]", i)
+						nextBase := fmt.Sprintf("[base_adj_%d]", i)
+						filterComplex = append(filterComplex, fmt.Sprintf("%ssplit=2%s%s", currentBase, rawTag, modTag))
+						filterComplex = append(filterComplex, fmt.Sprintf("%s%s%s", modTag, strings.Join(adjFilters, ","), fltTag))
+						filterComplex = append(filterComplex, fmt.Sprintf("%s%soverlay=enable='between(t,%.3f,%.3f)'%s", rawTag, fltTag, vc.Start, vc.Start+vc.Duration, nextBase))
+						currentBase = nextBase
+					}
+					continue
+				}
+
+				mediaInIdx++
+				inIdx := mediaInIdx
+				durSec := vc.Duration * vc.Speed
+				if vc.Kind == "image" {
+					args = append(args, "-loop", "1", "-t", fmt.Sprintf("%.3f", vc.Duration), "-i", vc.Path)
+				} else {
+					args = append(args, "-ss", fmt.Sprintf("%.3f", vc.SourceIn), "-t", fmt.Sprintf("%.3f", durSec), "-i", vc.Path)
+				}
+
+				clipTag := fmt.Sprintf("v%d", inIdx)
+
+				// Calculate scaled clip width and height
+				clipW := int(float64(outWidth) * vc.Scale)
+				clipH := int(float64(outHeight) * vc.Scale)
+				if clipW%2 != 0 {
+					clipW++
+				}
+				if clipH%2 != 0 {
+					clipH++
+				}
+
+				// Calculate position overlay offset
+				posX := (outWidth-clipW)/2 + int(vc.X*ratioX)
+				posY := (outHeight-clipH)/2 + int(vc.Y*ratioY)
+
+				var clipFilters []string
+				clipFilters = append(clipFilters, fmt.Sprintf("scale=%d:%d:force_original_aspect_ratio=decrease:force_divisible_by=2", clipW, clipH))
+				clipFilters = append(clipFilters, fmt.Sprintf("pad=%d:%d:(ow-iw)/2:(oh-ih)/2", clipW, clipH))
+
+				// Color adjustments
+				if vc.Brightness != 0 || vc.Contrast != 1 || vc.Saturation != 1 {
+					clipFilters = append(clipFilters, fmt.Sprintf("eq=brightness=%.2f:contrast=%.2f:saturation=%.2f", vc.Brightness, vc.Contrast, vc.Saturation))
+				}
+
+				// Pro Effects (Film Grain, Blur, Stylize)
+				if len(vc.EffectFilters) > 0 {
+					clipFilters = append(clipFilters, vc.EffectFilters...)
+				}
+
+				// Fade In / Out
+				if vc.FadeIn > 0 {
+					clipFilters = append(clipFilters, fmt.Sprintf("fade=t=in:st=0:d=%.3f:alpha=1", vc.FadeIn))
+				}
+				if vc.FadeOut > 0 {
+					st := vc.Duration - vc.FadeOut
+					if st < 0 {
+						st = 0
+					}
+					clipFilters = append(clipFilters, fmt.Sprintf("fade=t=out:st=%.3f:d=%.3f:alpha=1", st, vc.FadeOut))
+				}
+
+				// Rotation
+				if vc.Rotation != 0 {
+					clipFilters = append(clipFilters, fmt.Sprintf("rotate=%.4f*PI/180:fillcolor=none:ow='hypot(iw,ih)':oh='hypot(iw,ih)'", vc.Rotation))
+				}
+
+				clipFilters = append(clipFilters, "setsar=1", "format=rgba")
+				clipFilters = append(clipFilters, fmt.Sprintf("setpts=PTS-STARTPTS+%.3f/TB", vc.Start))
+
+				filterComplex = append(filterComplex, fmt.Sprintf("[%d:v]%s[%s]", inIdx, strings.Join(clipFilters, ","), clipTag))
+
+				xExpr := fmt.Sprintf("%d", posX)
+				yExpr := fmt.Sprintf("%d", posY)
+
+				for _, tr := range proj.Transitions {
+					if tr.ToClipID == vc.ID && tr.Duration > 0 {
+						tEnd := vc.Start + tr.Duration
+						switch tr.Type {
+						case "slide-left":
+							xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
+						case "slide-right":
+							xExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posX, outWidth, tEnd, tr.Duration, posX)
+						case "slide-up":
+							yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d+(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
+						case "slide-down":
+							yExpr = fmt.Sprintf("if(between(t,%.3f,%.3f),%d-(%d)*(%.3f-t)/%.3f,%d)", vc.Start, tEnd, posY, outHeight, tEnd, tr.Duration, posY)
+						}
+						break
+					}
+				}
+
+				nextBase := fmt.Sprintf("[base%d]", inIdx)
+				if bMode := ffmpegBlendMode(vc.BlendMode); bMode != "" {
+					bRaw := fmt.Sprintf("[braw_%d]", inIdx)
+					bUnder := fmt.Sprintf("[bunder_%d]", inIdx)
+					bOver := fmt.Sprintf("[bover_%d]", inIdx)
+					filterComplex = append(filterComplex, fmt.Sprintf("%ssplit=2%s%s", currentBase, bRaw, bUnder))
+					filterComplex = append(filterComplex, fmt.Sprintf("%s[%s]overlay=x='%s':y='%s':enable='between(t,%.3f,%.3f)'%s", bUnder, clipTag, xExpr, yExpr, vc.Start, vc.Start+vc.Duration, bOver))
+					filterComplex = append(filterComplex, fmt.Sprintf("%s%sblend=all_mode=%s:enable='between(t,%.3f,%.3f)'%s", bOver, bRaw, bMode, vc.Start, vc.Start+vc.Duration, nextBase))
+				} else {
+					filterComplex = append(filterComplex, fmt.Sprintf("%s[%s]overlay=x='%s':y='%s':enable='between(t,%.3f,%.3f)'%s", currentBase, clipTag, xExpr, yExpr, vc.Start, vc.Start+vc.Duration, nextBase))
+				}
+				currentBase = nextBase
+			}
+
+			audioStartIdx = mediaInputCount + 1
+		}
+
+		// Render Text & Subtitle Clips via ASS subtitles filter if any exist
+		if len(textClips) > 0 {
+			var subDir string
+			if a.storage != nil {
+				subDir = filepath.Join(a.storage.GetTempDir(), "subtitles")
+			}
+			assPath, err := createAssSubtitleFile(textClips, outWidth, outHeight, proj.Width, proj.Height, subDir)
+			if err == nil && assPath != "" {
+				// Schedule cleanup of temporary ASS file after 15 minutes
+				time.AfterFunc(15*time.Minute, func() {
+					_ = os.Remove(assPath)
+				})
+				escapedAss := strings.ReplaceAll(filepath.ToSlash(assPath), ":", "\\:")
+				nextBase := "[with_subtitles]"
+				filterComplex = append(filterComplex, fmt.Sprintf("%ssubtitles=filename='%s'%s", currentBase, escapedAss, nextBase))
+				currentBase = nextBase
+			}
 		}
 	}
 
@@ -1243,56 +1550,111 @@ func (a *App) BuildExportArgs(projectJson string, optionsJson string) (string, f
 	} else if len(audioTags) == 1 {
 		filterComplex = append(filterComplex, fmt.Sprintf("%sanull[aout]", audioTags[0]))
 		hasAudioOutput = true
+	} else if isAudioOnly {
+		args = append(args, "-f", "lavfi", "-i", fmt.Sprintf("anullsrc=channel_layout=stereo:sample_rate=48000:d=%.2f", dur))
+		filterComplex = append(filterComplex, fmt.Sprintf("[%d:a]anull[aout]", audioStartIdx))
+		hasAudioOutput = true
 	}
 
 	if len(filterComplex) > 0 {
 		args = append(args, "-filter_complex", strings.Join(filterComplex, "; "))
 	}
+
+	if isAudioOnly {
+		args = append(args, "-vn", "-map", "[aout]")
+		if opts.Format == "wav" {
+			args = append(args, "-c:a", "pcm_s16le")
+		} else {
+			args = append(args, "-c:a", "libmp3lame", "-b:a", "192k")
+		}
+		args = append(args, "-progress", "pipe:1", "-t", fmt.Sprintf("%.3f", dur), targetFile)
+		return targetFile, dur, args, nil
+	}
+
 	args = append(args, "-map", currentBase)
 
 	if hasAudioOutput {
 		args = append(args, "-map", "[aout]", "-c:a", "aac", "-b:a", "192k")
 	}
 
-	// Hardware Acceleration Selection (h264_nvenc, h264_qsv, h264_amf, h264_mf vs libx264)
-	encoderArgs := []string{"-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-threads", "0"}
-	switch opts.Quality {
-	case "draft":
-		encoderArgs = []string{"-c:v", "libx264", "-preset", "ultrafast", "-crf", "26", "-threads", "0"}
-	case "high":
-		encoderArgs = []string{"-c:v", "libx264", "-preset", "faster", "-crf", "18", "-threads", "0"}
+	useHevc := opts.Codec == "hevc"
+	cpuCodec := "libx264"
+	nvencCodec := "h264_nvenc"
+	qsvCodec := "h264_qsv"
+	amfCodec := "h264_amf"
+	mfCodec := "h264_mf"
+	if useHevc {
+		cpuCodec = "libx265"
+		nvencCodec = "hevc_nvenc"
+		qsvCodec = "hevc_qsv"
+		amfCodec = "hevc_amf"
+		mfCodec = "hevc_mf"
 	}
 
-	if opts.Encoder != "cpu" {
-		if a.testEncoder("h264_nvenc") {
-			switch opts.Quality {
-			case "draft":
-				encoderArgs = []string{"-c:v", "h264_nvenc", "-preset", "p1", "-cq", "28"}
-			case "high":
-				encoderArgs = []string{"-c:v", "h264_nvenc", "-preset", "p6", "-cq", "19"}
-			default:
-				encoderArgs = []string{"-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"}
-			}
-		} else if a.testEncoder("h264_qsv") {
-			switch opts.Quality {
-			case "draft":
-				encoderArgs = []string{"-c:v", "h264_qsv", "-global_quality", "28"}
-			case "high":
-				encoderArgs = []string{"-c:v", "h264_qsv", "-global_quality", "19"}
-			default:
-				encoderArgs = []string{"-c:v", "h264_qsv", "-global_quality", "23"}
-			}
-		} else if a.testEncoder("h264_amf") {
-			switch opts.Quality {
-			case "draft":
-				encoderArgs = []string{"-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_p", "28", "-qp_i", "28"}
-			case "high":
-				encoderArgs = []string{"-c:v", "h264_amf", "-quality", "quality", "-rc", "cqp", "-qp_p", "19", "-qp_i", "19"}
-			default:
-				encoderArgs = []string{"-c:v", "h264_amf", "-quality", "speed", "-rc", "cqp", "-qp_p", "23", "-qp_i", "23"}
-			}
-		} else if a.testEncoder("h264_mf") {
-			encoderArgs = []string{"-c:v", "h264_mf"}
+	// Default CPU software encoder fallback
+	encoderArgs := []string{"-c:v", cpuCodec, "-preset", "veryfast", "-crf", "21", "-threads", "0"}
+	switch opts.Quality {
+	case "draft":
+		encoderArgs = []string{"-c:v", cpuCodec, "-preset", "ultrafast", "-crf", "26", "-threads", "0"}
+	case "high":
+		encoderArgs = []string{"-c:v", cpuCodec, "-preset", "faster", "-crf", "18", "-threads", "0"}
+	}
+
+	buildNvencArgs := func() []string {
+		switch opts.Quality {
+		case "draft":
+			return []string{"-c:v", nvencCodec, "-preset", "p1", "-cq", "28"}
+		case "high":
+			return []string{"-c:v", nvencCodec, "-preset", "p6", "-cq", "19"}
+		default:
+			return []string{"-c:v", nvencCodec, "-preset", "p4", "-cq", "23"}
+		}
+	}
+	buildQsvArgs := func() []string {
+		switch opts.Quality {
+		case "draft":
+			return []string{"-c:v", qsvCodec, "-global_quality", "28"}
+		case "high":
+			return []string{"-c:v", qsvCodec, "-global_quality", "19"}
+		default:
+			return []string{"-c:v", qsvCodec, "-global_quality", "23"}
+		}
+	}
+	buildAmfArgs := func() []string {
+		switch opts.Quality {
+		case "draft":
+			return []string{"-c:v", amfCodec, "-quality", "speed", "-rc", "cqp", "-qp_p", "28", "-qp_i", "28"}
+		case "high":
+			return []string{"-c:v", amfCodec, "-quality", "quality", "-rc", "cqp", "-qp_p", "19", "-qp_i", "19"}
+		default:
+			return []string{"-c:v", amfCodec, "-quality", "speed", "-rc", "cqp", "-qp_p", "23", "-qp_i", "23"}
+		}
+	}
+
+	switch opts.Encoder {
+	case "cpu":
+		// Keep CPU software encoderArgs
+	case "nvenc":
+		if a.testEncoder(nvencCodec) {
+			encoderArgs = buildNvencArgs()
+		}
+	case "qsv":
+		if a.testEncoder(qsvCodec) {
+			encoderArgs = buildQsvArgs()
+		}
+	case "amf":
+		if a.testEncoder(amfCodec) {
+			encoderArgs = buildAmfArgs()
+		}
+	default: // "auto", "gpu", or ""
+		if a.testEncoder(nvencCodec) {
+			encoderArgs = buildNvencArgs()
+		} else if a.testEncoder(qsvCodec) {
+			encoderArgs = buildQsvArgs()
+		} else if a.testEncoder(amfCodec) {
+			encoderArgs = buildAmfArgs()
+		} else if a.testEncoder(mfCodec) {
+			encoderArgs = []string{"-c:v", mfCodec}
 		}
 	}
 
@@ -1422,8 +1784,9 @@ func (a *App) GetStartupProject() (*ProjectOpenResult, error) {
 }
 
 func (a *App) SaveMediaCache(name string, base64Data string) (string, error) {
-	if name == "" {
-		name = "media_" + uuid.NewString()
+	safeName := filepath.Base(strings.TrimSpace(name))
+	if safeName == "" || safeName == "." || safeName == ".." || safeName == string(filepath.Separator) {
+		safeName = "media_" + uuid.NewString()
 	}
 	raw := base64Data
 	if idx := strings.Index(base64Data, ","); idx != -1 {
@@ -1438,11 +1801,53 @@ func (a *App) SaveMediaCache(name string, base64Data string) (string, error) {
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return "", err
 	}
-	targetPath := filepath.Join(cacheDir, name)
+	targetPath := filepath.Join(cacheDir, safeName)
+	absCache, err1 := filepath.Abs(cacheDir)
+	absTarget, err2 := filepath.Abs(targetPath)
+	if err1 != nil || err2 != nil || (!strings.HasPrefix(strings.ToLower(absTarget), strings.ToLower(absCache)+string(filepath.Separator))) {
+		return "", fmt.Errorf("invalid media cache file name")
+	}
 	if err := os.WriteFile(targetPath, data, 0644); err != nil {
 		return "", err
 	}
 	media.RegisterSearchDir(cacheDir)
 	return targetPath, nil
+}
+
+func (a *App) CheckForUpdate(force bool) (*updater.UpdateInfo, error) {
+	if a.updater == nil {
+		return nil, fmt.Errorf("updater belum diinisialisasi")
+	}
+	return a.updater.CheckForUpdate(AppVersion, force)
+}
+
+func (a *App) DownloadUpdate(downloadUrl string) (string, error) {
+	if a.updater == nil {
+		return "", fmt.Errorf("updater belum diinisialisasi")
+	}
+	return a.updater.DownloadUpdate(context.Background(), downloadUrl, func(progress updater.UpdateProgress) {
+		runtime.EventsEmit(a.ctx, "update_progress", progress)
+	})
+}
+
+func (a *App) InstallUpdate(installerPath string) error {
+	if a.updater == nil {
+		return fmt.Errorf("updater belum diinisialisasi")
+	}
+	return a.updater.InstallUpdate(installerPath)
+}
+
+func (a *App) GetUpdateSettings() updater.UpdateSettings {
+	if a.updater == nil {
+		return updater.UpdateSettings{AutoCheck: true}
+	}
+	return a.updater.GetSettings()
+}
+
+func (a *App) SetAutoCheckUpdate(enabled bool) error {
+	if a.updater == nil {
+		return fmt.Errorf("updater belum diinisialisasi")
+	}
+	return a.updater.SetAutoCheck(enabled)
 }
 

@@ -81,6 +81,65 @@ export interface ShapeMask {
   feather: number;
   invert: boolean;
 }
+export type BlendMode =
+  | "normal"
+  | "screen"
+  | "multiply"
+  | "overlay"
+  | "soft-light"
+  | "hard-light"
+  | "color-dodge";
+
+export type GrainPresetId =
+  | "kodak-35mm"
+  | "fuji-eterna"
+  | "16mm-analog"
+  | "super-8mm"
+  | "prnu-cloak"
+  | "high-iso"
+  | "micro-dither"
+  | "crt-vhs";
+
+export interface FilmGrainEffect {
+  enabled: boolean;
+  preset: GrainPresetId;
+  engine: "analog" | "digital";
+  movement: "dynamic" | "static";
+  intensity: number;
+  grainSize: "micro" | "fine" | "medium" | "coarse" | "heavy";
+  protectHighlights: boolean;
+  chromaticDispersion: boolean;
+}
+
+export interface BlurEffect {
+  enabled: boolean;
+  type: "gaussian" | "motion" | "radial";
+  radius: number;
+  angle: number;
+}
+
+export interface StylizeEffect {
+  enabled: boolean;
+  vignette: number;
+  chromaticAberration: number;
+  scanlines: number;
+  bloom: number;
+  sharpen: number;
+}
+
+export interface ClipEffects {
+  grain?: FilmGrainEffect;
+  blur?: BlurEffect;
+  stylize?: StylizeEffect;
+}
+
+export interface TimelineMarker {
+  id: string;
+  time: number;
+  label: string;
+  color?: string;
+}
+
 export interface Clip {
   id: string;
   /** Persistent editing association; rendering still uses each clip’s own timing. */
@@ -96,6 +155,9 @@ export interface Clip {
   muted: boolean;
   transform: Transform;
   adjustments: Adjustments;
+  effects?: ClipEffects;
+  blendMode?: BlendMode;
+  isAdjustmentLayer?: boolean;
   text?: TextStyle;
   fadeIn: number;
   fadeOut: number;
@@ -117,6 +179,7 @@ export interface Track {
   muted: boolean;
   hidden: boolean;
   locked: boolean;
+  solo?: boolean;
 }
 export type TransitionType =
   | "dissolve"
@@ -150,6 +213,7 @@ export interface Project {
   tracks: Track[];
   clips: Clip[];
   transitions?: Transition[];
+  markers?: TimelineMarker[];
   createdAt: string;
   updatedAt: string;
 }
@@ -160,8 +224,9 @@ export interface ExportOptions {
   height: number;
   fps: number;
   quality: "draft" | "standard" | "high";
-  format: "mp4" | "mov";
-  encoder?: "auto" | "gpu" | "cpu";
+  format: "mp4" | "mov" | "mp3" | "wav";
+  codec?: "h264" | "hevc";
+  encoder?: "auto" | "gpu" | "cpu" | "nvenc" | "qsv" | "amf";
   bitrate?: string;
 }
 export interface ExportProgress {
@@ -256,7 +321,7 @@ export interface EditorAPI {
   ) => Promise<{ project: Project; path: string }>;
   chooseExportPath: (
     name: string,
-    format: "mp4" | "mov",
+    format: "mp4" | "mov" | "mp3" | "wav",
   ) => Promise<string | null>;
   exportProject: (
     project: Project,
@@ -295,6 +360,39 @@ export interface EditorAPI {
   relocateStorage?: (newDrive: string) => Promise<StorageInfo>;
   listWhisperModels?: () => Promise<WhisperModel[]>;
   importWhisperModel?: () => Promise<string>;
+  checkForUpdate?: (force?: boolean) => Promise<UpdateInfo | null>;
+  downloadUpdate?: (downloadUrl: string) => Promise<string | null>;
+  onUpdateProgress?: (callback: (progress: UpdateProgress) => void) => () => void;
+  onUpdateAvailable?: (callback: (info: UpdateInfo) => void) => () => void;
+  installUpdate?: (installerPath: string) => Promise<void>;
+  getUpdateSettings?: () => Promise<UpdateSettings>;
+  setUpdateSettings?: (settings: Partial<UpdateSettings>) => Promise<void>;
+}
+
+export interface UpdateInfo {
+  available: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  releaseName: string;
+  releaseNotes: string;
+  downloadUrl: string;
+  assetName: string;
+  assetSize: number;
+  publishedAt: string;
+}
+
+export interface UpdateProgress {
+  downloadedBytes: number;
+  totalBytes: number;
+  percentage: number;
+  status: "idle" | "downloading" | "completed" | "error";
+  error?: string;
+  installerPath?: string;
+}
+
+export interface UpdateSettings {
+  autoCheck: boolean;
+  lastChecked: number;
 }
 
 export interface StorageInfo {
@@ -303,6 +401,7 @@ export interface StorageInfo {
   isPortable: boolean;
   projectsDir: string;
   cacheDir: string;
+  tempDir?: string;
   modelsDir: string;
 }
 

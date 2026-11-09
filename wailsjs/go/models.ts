@@ -87,6 +87,8 @@ export namespace main {
 	    path: string;
 	    url: string;
 	    previewUrl?: string;
+	    thumbnail?: string;
+	    waveform?: number[];
 	    color?: string;
 	    kind: string;
 	    width: number;
@@ -108,6 +110,8 @@ export namespace main {
 	        this.path = source["path"];
 	        this.url = source["url"];
 	        this.previewUrl = source["previewUrl"];
+	        this.thumbnail = source["thumbnail"];
+	        this.waveform = source["waveform"];
 	        this.color = source["color"];
 	        this.kind = source["kind"];
 	        this.width = source["width"];
@@ -220,6 +224,7 @@ export namespace project {
 	    isPortable: boolean;
 	    projectsDir: string;
 	    cacheDir: string;
+	    tempDir: string;
 	    modelsDir: string;
 	
 	    static createFrom(source: any = {}) {
@@ -233,7 +238,55 @@ export namespace project {
 	        this.isPortable = source["isPortable"];
 	        this.projectsDir = source["projectsDir"];
 	        this.cacheDir = source["cacheDir"];
+	        this.tempDir = source["tempDir"];
 	        this.modelsDir = source["modelsDir"];
+	    }
+	}
+
+}
+
+export namespace updater {
+	
+	export class UpdateInfo {
+	    available: boolean;
+	    currentVersion: string;
+	    latestVersion: string;
+	    releaseName: string;
+	    releaseNotes: string;
+	    downloadUrl: string;
+	    assetName: string;
+	    assetSize: number;
+	    publishedAt: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.available = source["available"];
+	        this.currentVersion = source["currentVersion"];
+	        this.latestVersion = source["latestVersion"];
+	        this.releaseName = source["releaseName"];
+	        this.releaseNotes = source["releaseNotes"];
+	        this.downloadUrl = source["downloadUrl"];
+	        this.assetName = source["assetName"];
+	        this.assetSize = source["assetSize"];
+	        this.publishedAt = source["publishedAt"];
+	    }
+	}
+	export class UpdateSettings {
+	    autoCheck: boolean;
+	    lastChecked: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new UpdateSettings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.autoCheck = source["autoCheck"];
+	        this.lastChecked = source["lastChecked"];
 	    }
 	}
 

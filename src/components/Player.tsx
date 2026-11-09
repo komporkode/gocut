@@ -2,10 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import {
   Grid,
   Maximize,
+  Monitor,
   Pause,
   Play,
+  RotateCw,
   SkipBack,
   SkipForward,
+  Smartphone,
+  Square,
   Volume2,
   VolumeX,
   ZoomIn,
@@ -29,7 +33,9 @@ import {
   imagePreviewLayer,
   textPreviewLayer,
   clearPreviewLayers,
+  applyAdjustmentLayerToCanvas,
 } from "../editor/previewLayers";
+import { blendModeToCompositeOp } from "../core/effectsEngine";
 import { useEditorStore } from "../editor/store";
 import { useTranslation } from "../i18n";
 interface PlayerProps {
@@ -78,6 +84,7 @@ export default function Player(props: PlayerProps) {
     [errors, setErrors] = useState<string[]>([]),
     [viewScale, setViewScale] = useState(1),
     [size, setSize] = useState({ w: 720, h: 405 });
+  const [stageTilt, setStageTilt] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const localMuted = useRef(muted);
   localMuted.current = muted;
   const duration = projectDuration(project);
@@ -88,6 +95,22 @@ export default function Player(props: PlayerProps) {
     dy: number;
     clip: Clip;
   } | null>(null);
+
+  const handleStagePointerMove = (e: React.PointerEvent) => {
+    if (project.clips.length > 0) return;
+    const stage = hostRef.current;
+    if (!stage) return;
+    const rect = stage.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const nx = Math.max(-1, Math.min(1, (e.clientX - cx) / (rect.width / 2 || 1)));
+    const ny = Math.max(-1, Math.min(1, (e.clientY - cy) / (rect.height / 2 || 1)));
+    setStageTilt({ x: nx * 14, y: -ny * 14 });
+  };
+
+  const handleStagePointerLeave = () => {
+    setStageTilt({ x: 0, y: 0 });
+  };
   useEffect(() => {
     const observer = new ResizeObserver((entries) => {
       const rect = entries[0].contentRect;
@@ -133,7 +156,7 @@ export default function Player(props: PlayerProps) {
           : document.createElement(asset.kind === "audio" ? "audio" : "video");
       const source: Source = { element, url };
       if (element instanceof HTMLMediaElement) {
-        element.preload = "auto";
+        element.preload = "metadata";
         if (url.startsWith("http://") || url.startsWith("https://")) {
           element.crossOrigin = "anonymous";
         }
@@ -259,6 +282,13 @@ export default function Player(props: PlayerProps) {
     ctx.filter = "none";
     ctx.fillStyle = p.background;
     ctx.fillRect(0, 0, p.width, p.height);
+    const trackMap = new Map(p.tracks.map((t) => [t.id, t]));
+    const assetMap = new Map(p.assets.map((a) => [a.id, a]));
+    const clipMap = new Map(p.clips.map((c) => [c.id, c]));
+    const hasSoloVisual = p.tracks.some((t) => t.kind !== "audio" && t.solo);
+    const hasSoloAudio = p.tracks.some(
+      (t) => (t.kind === "audio" || t.kind === "video") && t.solo,
+    );
     const clips = [...p.tracks]
       .reverse()
       .flatMap((track) =>
@@ -267,7 +297,9 @@ export default function Player(props: PlayerProps) {
           .sort((a, b) => a.start - b.start),
       );
     for (const clip of clips) {
-      const track = p.tracks.find((t) => t.id === clip.trackId)!;
+      const track = trackMap.get(clip.trackId)!;
+      const isAudioMutedBySolo = hasSoloAudio && !track.solo;
+      const isVisualHiddenBySolo = hasSoloVisual && !track.solo;
       const active =
         paintTime >= clip.start && paintTime < clip.start + clip.duration;
       const source = sources.current.get(clip.id);
@@ -300,7 +332,7 @@ export default function Player(props: PlayerProps) {
                 } catch {}
               }
               ncMedia.playbackRate = nc.speed * clip.speed;
-              let gain = (track.muted || clip.muted || nc.muted || localMuted.current) ? 0 : (evaluated.volume * nc.volume);
+              let gain = (track.muted || isAudioMutedBySolo || clip.muted || nc.muted || localMuted.current) ? 0 : (evaluated.volume * nc.volume);
               if (ncSource?.gain) {
                 ncSource.gain.gain.value = gain;
                 ncMedia.volume = 1;
@@ -314,7 +346,7 @@ export default function Player(props: PlayerProps) {
       // Transition modifiers (audio gain and visual transform/alpha)
       const transOut = p.transitions?.find((t) => t.fromClipId === clip.id);
       const transIn = p.transitions?.find((t) => t.toClipId === clip.id);
-      const toClipForTrans = transOut ? p.clips.find((c) => c.id === transOut.toClipId) : null;
+      const toClipForTrans = transOut ? clipMap.get(transOut.toClipId) : null;
 
       let transGainMod = 1;
       let transAlphaMod = 1;
@@ -365,7 +397,7 @@ export default function Player(props: PlayerProps) {
         }
         media.playbackRate = clip.speed;
         let gain =
-          track.muted || clip.muted || localMuted.current
+          track.muted || isAudioMutedBySolo || clip.muted || localMuted.current
             ? 0
             : evaluated.volume;
         gain *= evaluateFade(clip, local, "audio");
@@ -378,9 +410,19 @@ export default function Player(props: PlayerProps) {
         if (isPlaying && media.paused) void media.play().catch(() => {});
         if (!isPlaying && !media.paused) media.pause();
       }
-      if (!active || track.hidden || track.kind === "audio") continue;
+      if (!active || track.hidden || isVisualHiddenBySolo || track.kind === "audio") continue;
       const alpha =
         evaluated.transform.opacity * evaluateFade(clip, local, "video") * transAlphaMod;
+      if (clip.isAdjustmentLayer) {
+        applyAdjustmentLayerToCanvas(
+          ctx,
+          clip,
+          factor,
+          paintTime,
+          Math.max(0, Math.min(1, alpha)),
+        );
+        continue;
+      }
       const movement =
         drag.current?.clip.id === clip.id ? drag.current : null;
       const tr = movement
@@ -398,6 +440,7 @@ export default function Player(props: PlayerProps) {
           };
       ctx.save();
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.globalCompositeOperation = blendModeToCompositeOp(clip.blendMode);
       ctx.translate(p.width / 2 + tr.x, p.height / 2 + tr.y);
       ctx.rotate((tr.rotation * Math.PI) / 180);
       ctx.scale(
@@ -406,7 +449,12 @@ export default function Player(props: PlayerProps) {
       );
       const a = clip.adjustments;
       const filters: string[] = [];
-      if (a.blur > 0) filters.push(`blur(${a.blur * factor}px)`);
+      const gaussianBlur =
+        a.blur +
+        (clip.effects?.blur?.enabled && clip.effects.blur.type === "gaussian"
+          ? clip.effects.blur.radius
+          : 0);
+      if (gaussianBlur > 0) filters.push(`blur(${gaussianBlur * factor}px)`);
       if (!clip.chromaKey?.enabled && !clip.mask && a.temperature === 0) {
         if (a.brightness !== 0) filters.push(`brightness(${Math.max(0, 1 + a.brightness)})`);
         if (a.contrast !== 1) filters.push(`contrast(${Math.max(0, a.contrast)})`);
@@ -435,7 +483,7 @@ export default function Player(props: PlayerProps) {
           } else {
             const ncSource = sources.current.get(nc.id);
             const ncMedia = ncSource?.element;
-            const asset = p.assets.find((a) => a.id === nc.assetId);
+            const asset = nc.assetId ? assetMap.get(nc.assetId) : undefined;
             if (asset && ncMedia) {
               try {
                 if (!(
@@ -470,8 +518,8 @@ export default function Player(props: PlayerProps) {
           layer.width,
           layer.height,
         );
-      } else if (media) {
-        const asset = p.assets.find((a) => a.id === clip.assetId)!;
+      } else if (media && clip.assetId) {
+        const asset = assetMap.get(clip.assetId)!;
         try {
           if (!(
             (media instanceof HTMLVideoElement && media.readyState < 2) ||
@@ -542,6 +590,38 @@ export default function Player(props: PlayerProps) {
   const aspect = project.width / project.height,
     displayW = Math.min(size.w, size.h * aspect) * viewScale,
     displayH = displayW / aspect;
+
+  const isPortrait = aspect < 0.9;
+  const isSquare = aspect >= 0.9 && aspect <= 1.15;
+  const isLandscape = aspect > 1.15;
+  const minDim = Math.min(displayW, displayH);
+  const logoSize = Math.max(34, Math.min(68, Math.round(minDim * 0.22)));
+  const isCompact = minDim < 260;
+  const isUltraCompact = minDim < 170;
+
+  let ratioLabel = `${project.width}:${project.height}`;
+  if (Math.abs(aspect - 16 / 9) < 0.05) ratioLabel = "16:9";
+  else if (Math.abs(aspect - 9 / 16) < 0.05) ratioLabel = "9:16";
+  else if (Math.abs(aspect - 1) < 0.05) ratioLabel = "1:1";
+  else if (Math.abs(aspect - 4 / 3) < 0.05) ratioLabel = "4:3";
+  else if (Math.abs(aspect - 21 / 9) < 0.05) ratioLabel = "21:9";
+
+  const handleRotateCanvas = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    useEditorStore.getState().updateProject({
+      width: project.height,
+      height: project.width,
+    });
+  };
+
+  const handleSetAspect = (w: number, h: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    useEditorStore.getState().updateProject({
+      width: w,
+      height: h,
+    });
+  };
+
   return (
     <section className="player-panel panel" aria-label={t("player.title")}>
       <div className="panel-heading">
@@ -550,7 +630,12 @@ export default function Player(props: PlayerProps) {
           {project.width} × {project.height} · {project.fps} fps
         </span>
       </div>
-      <div className="player-stage" ref={hostRef}>
+      <div
+        className="player-stage"
+        ref={hostRef}
+        onPointerMove={handleStagePointerMove}
+        onPointerLeave={handleStagePointerLeave}
+      >
         <div className="player-stage-content">
           <div className="player-canvas-wrapper" style={{ width: displayW, height: displayH }}>
             <canvas
@@ -657,18 +742,88 @@ export default function Player(props: PlayerProps) {
               />
             );
           })()}
-        </div>
-        <AudioVuMeter analyser={analyserNode} playing={playing} />
-      </div>
         {!project.clips.length && (
-          <div className="player-empty" style={{ width: displayW, maxWidth: displayW, padding: "0 14px", boxSizing: "border-box" }}>
-            <div className="preview-mark">
-              <img src="./icons/gocut.png" width={Math.max(40, Math.min(68, Math.round(displayW * 0.28)))} height={Math.max(40, Math.min(68, Math.round(displayW * 0.28)))} alt="GoCut" />
+          <div
+            className={`player-empty ${isPortrait ? "is-portrait" : isSquare ? "is-square" : "is-landscape"}`}
+            aria-label={t("player.emptyTitle")}
+          >
+            <div className="player-empty-inner">
+              <div className="preview-mark-container">
+                <div
+                  className={`preview-silhouette ${isPortrait ? "is-portrait" : isSquare ? "is-square" : "is-landscape"}`}
+                  style={{
+                    transform: `scale(${Math.max(0.65, Math.min(1.2, minDim / 320))})`,
+                  }}
+                />
+                <div
+                  className="preview-mark"
+                  style={{
+                    transform: `perspective(600px) rotateX(${stageTilt.y}deg) rotateY(${stageTilt.x}deg)`,
+                    transition: "transform 0.16s cubic-bezier(0.2, 0, 0, 1)",
+                  }}
+                >
+                  <img
+                    src="./icons/gocut.png"
+                    width={logoSize}
+                    height={logoSize}
+                    alt="GoCut"
+                    style={{
+                      borderRadius: `${Math.round(logoSize * 0.24)}px`,
+                    }}
+                  />
+                </div>
+              </div>
+              <p>{t("player.emptyTitle")}</p>
+              {!isUltraCompact && <span>{t("player.emptyDesc")}</span>}
+              {!isUltraCompact && (
+                <div className="preview-ratio-bar">
+                  <span className="preview-ratio-tag">
+                    {isPortrait ? (
+                      <Smartphone size={11} />
+                    ) : isSquare ? (
+                      <Square size={11} />
+                    ) : (
+                      <Monitor size={11} />
+                    )}
+                    <span>{ratioLabel}</span>
+                  </span>
+                  <button
+                    className="preview-ratio-rotate-btn"
+                    title={t("player.rotateCanvas") || "Putar orientasi kanvas"}
+                    onClick={handleRotateCanvas}
+                  >
+                    <RotateCw size={11} />
+                    <span>{isPortrait ? "16:9" : "9:16"}</span>
+                  </button>
+                  {!isCompact && (
+                    <div className="preview-ratio-presets">
+                      <button
+                        className={`preview-ratio-chip ${ratioLabel === "16:9" ? "is-active" : ""}`}
+                        onClick={(e) => handleSetAspect(1920, 1080, e)}
+                      >
+                        16:9
+                      </button>
+                      <button
+                        className={`preview-ratio-chip ${ratioLabel === "9:16" ? "is-active" : ""}`}
+                        onClick={(e) => handleSetAspect(1080, 1920, e)}
+                      >
+                        9:16
+                      </button>
+                      <button
+                        className={`preview-ratio-chip ${ratioLabel === "1:1" ? "is-active" : ""}`}
+                        onClick={(e) => handleSetAspect(1080, 1080, e)}
+                      >
+                        1:1
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <p>{t("player.emptyTitle")}</p>
-            <span>{t("player.emptyDesc")}</span>
           </div>
         )}
+        </div>
+      </div>
         {selectedIds.length === 1 &&
           project.clips.some(
             (c) =>
@@ -767,7 +922,7 @@ export default function Player(props: PlayerProps) {
             </select>
           </div>
           <button
-            className={`player-tool-btn ${safeZoneMode !== "none" ? "is-active" : ""}`}
+            className={`player-tool-btn player-safe-zone-btn ${safeZoneMode !== "none" ? "is-active" : ""}`}
             title={`Panduan Safe Margin: ${safeZoneMode === "none" ? "Off" : safeZoneMode} (Klik untuk ganti)`}
             aria-label="Toggle Safe Margin"
             onClick={() => {
@@ -778,22 +933,31 @@ export default function Player(props: PlayerProps) {
           >
             <Grid size={12} />
           </button>
+          <div className="player-volume-group">
+            <button
+              className="player-tool-btn player-mute-btn"
+              title={muted ? t("player.unmute") : t("player.mute")}
+              onClick={() => setMuted(!muted)}
+            >
+              {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
+            </button>
+            <AudioVuMeter
+              analyser={analyserNode}
+              playing={playing}
+              orientation="horizontal"
+              muted={muted}
+              onToggleMute={() => setMuted(!muted)}
+            />
+          </div>
           <button
-            className="player-tool-btn"
-            title={muted ? t("player.unmute") : t("player.mute")}
-            onClick={() => setMuted(!muted)}
-          >
-            {muted ? <VolumeX size={13} /> : <Volume2 size={13} />}
-          </button>
-          <button
-            className="player-tool-btn"
+            className="player-tool-btn player-zoom-btn"
             title={t("player.zoom")}
             onClick={() => setViewScale(viewScale === 1 ? 1.5 : 1)}
           >
             <ZoomIn size={13} />
           </button>
           <button
-            className="player-tool-btn"
+            className="player-tool-btn player-fullscreen-btn"
             title={t("player.fullscreen")}
             onClick={() => {
               if (document.fullscreenElement) void document.exitFullscreen();

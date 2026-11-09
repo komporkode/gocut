@@ -1,15 +1,21 @@
 import { create } from "zustand";
 import type {
+  Adjustments,
+  BlendMode,
   Clip,
+  ClipEffects,
   MediaAsset,
   Project,
+  TimelineMarker,
   Track,
   TrackKind,
+  Transform,
 } from "../core/types";
 import {
   createProject,
   createTrack,
   createClip,
+  createAdjustmentClip,
   clone,
   id,
   snapToFrame,
@@ -43,6 +49,12 @@ interface EditorState {
   past: Project[];
   future: Project[];
   clipboard: Clip[];
+  attributeClipboard: {
+    adjustments: Adjustments;
+    effects?: ClipEffects;
+    blendMode?: BlendMode;
+    transform: Transform;
+  } | null;
   setProject: (project: Project, path?: string) => void;
   commit: (project: Project) => void;
   beginTransaction: () => void;
@@ -94,6 +106,18 @@ interface EditorState {
   duplicate: () => void;
   copy: () => void;
   paste: () => void;
+  addAdjustmentLayer: (
+    start?: number,
+    duration?: number,
+    patch?: Partial<Clip>,
+    trackId?: string,
+  ) => string;
+  copyClipAttributes: (clipId?: string) => void;
+  pasteClipAttributes: (targetIds?: string[]) => void;
+  addMarker: (time?: number, label?: string, color?: string) => void;
+  updateMarker: (markerId: string, patch: Partial<TimelineMarker>) => void;
+  removeMarker: (markerId: string) => void;
+  toggleTrackSolo: (trackId: string) => void;
   addTrack: (kind: TrackKind) => void;
   deleteTrack: (trackId: string) => void;
   reorderTrack: (trackId: string, direction: "up" | "down") => void;
@@ -114,7 +138,9 @@ const acceptsAsset = (track: Track, asset: MediaAsset) =>
 const acceptsClip = (p: Project, track: Track, clip: Clip) =>
   clip.text
     ? track.kind === "text"
-    : !!p.assets.find((a) => a.id === clip.assetId && acceptsAsset(track, a));
+    : clip.isAdjustmentLayer || clip.isCompound
+      ? track.kind === "video"
+      : !!p.assets.find((a) => a.id === clip.assetId && acceptsAsset(track, a));
 const editable = (p: Project, clip: Clip) =>
   !!p.tracks.find((t) => t.id === clip.trackId && !t.locked);
 function copyLink(group: string | undefined, copies: Map<string, string>) {
@@ -206,7 +232,18 @@ export function isProjectEqual(a: Project, b: Project): boolean {
       tA.kind !== tB.kind ||
       tA.muted !== tB.muted ||
       tA.hidden !== tB.hidden ||
-      tA.locked !== tB.locked
+      tA.locked !== tB.locked ||
+      Boolean(tA.solo) !== Boolean(tB.solo)
+    ) return false;
+  }
+  const mA = a.markers ?? [], mB = b.markers ?? [];
+  if (mA.length !== mB.length) return false;
+  for (let i = 0; i < mA.length; i++) {
+    if (
+      mA[i].id !== mB[i].id ||
+      mA[i].time !== mB[i].time ||
+      mA[i].label !== mB[i].label ||
+      mA[i].color !== mB[i].color
     ) return false;
   }
   for (let i = 0; i < a.assets.length; i++) {
@@ -240,8 +277,13 @@ export function isProjectEqual(a: Project, b: Project): boolean {
       cA.fadeIn !== cB.fadeIn ||
       cA.fadeOut !== cB.fadeOut ||
       cA.audioFadeIn !== cB.audioFadeIn ||
-      cA.audioFadeOut !== cB.audioFadeOut
+      cA.audioFadeOut !== cB.audioFadeOut ||
+      cA.blendMode !== cB.blendMode ||
+      Boolean(cA.isAdjustmentLayer) !== Boolean(cB.isAdjustmentLayer)
     ) return false;
+    if (cA.effects !== cB.effects) {
+      if (JSON.stringify(cA.effects) !== JSON.stringify(cB.effects)) return false;
+    }
     if (cA.transform !== cB.transform) {
       const tA = cA.transform, tB = cB.transform;
       if (
@@ -403,6 +445,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   past: [],
   future: [],
   clipboard: [],
+  attributeClipboard: null,
   transactionOpen: false,
   transactionRecorded: false,
   beginTransaction: () => {
@@ -940,6 +983,148 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     get().commit({ ...s.project, clips: [...s.project.clips, ...clips] });
     set({ selectedIds: clips.map((c) => c.id) });
+  },
+  addAdjustmentLayer: (start, duration = 5, patch, trackId) => {
+    const s = get();
+    const p = clone(s.project);
+    const clipStart = snapToFrame(
+      Math.max(0, start ?? s.playhead),
+      p.fps,
+    );
+    const clipDur = Math.max(1 / p.fps, duration);
+    let targetTrack = trackId
+      ? p.tracks.find((t) => t.id === trackId && t.kind === "video" && !t.locked)
+      : undefined;
+
+    if (!targetTrack) {
+      // Find a video track without overlap at [clipStart, clipStart + clipDur]
+      const videoTracks = p.tracks.filter((t) => t.kind === "video" && !t.locked);
+      targetTrack = videoTracks.find(
+        (t) =>
+          !p.clips.some(
+            (c) =>
+              c.trackId === t.id &&
+              c.start < clipStart + clipDur - 1e-6 &&
+              c.start + c.duration > clipStart + 1e-6,
+          ),
+      );
+      if (!targetTrack) {
+        const count = p.tracks.filter((t) => t.kind === "video").length + 1;
+        const newTrack = createTrack("video", `Adjustment ${count}`);
+        const firstVideoIdx = p.tracks.findIndex((t) => t.kind === "video");
+        p.tracks.splice(firstVideoIdx >= 0 ? firstVideoIdx : 0, 0, newTrack);
+        targetTrack = newTrack;
+      }
+    }
+
+    const adj = {
+      ...createAdjustmentClip(
+        targetTrack.id,
+        clipStart,
+        clipDur,
+        p.fps,
+        patch?.name || "Adjustment Layer",
+      ),
+      ...(patch ? clone(patch) : {}),
+      trackId: targetTrack.id,
+      isAdjustmentLayer: true,
+    };
+    p.clips.push(adj);
+    get().commit(p);
+    set({ selectedIds: [adj.id], selectedTransitionId: null });
+    return adj.id;
+  },
+  copyClipAttributes: (clipId) => {
+    const s = get();
+    const targetId = clipId ?? s.selectedIds[0];
+    if (!targetId) return;
+    const clip = s.project.clips.find((c) => c.id === targetId);
+    if (!clip) return;
+    set({
+      attributeClipboard: {
+        adjustments: clone(clip.adjustments),
+        effects: clip.effects ? clone(clip.effects) : undefined,
+        blendMode: clip.blendMode,
+        transform: clone(clip.transform),
+      },
+    });
+  },
+  pasteClipAttributes: (targetIds) => {
+    const s = get();
+    if (!s.attributeClipboard) return;
+    const ids = targetIds ?? s.selectedIds;
+    if (!ids.length) return;
+    const idSet = new Set(ids);
+    const attr = s.attributeClipboard;
+    const clips = s.project.clips.map((c) => {
+      if (!idSet.has(c.id) || !editable(s.project, c)) return c;
+      return {
+        ...c,
+        adjustments: clone(attr.adjustments),
+        effects: attr.effects ? clone(attr.effects) : undefined,
+        blendMode: attr.blendMode,
+        transform: clone(attr.transform),
+      };
+    });
+    get().commit({ ...s.project, clips });
+  },
+  addMarker: (time, label, color = "#f59e0b") => {
+    const s = get();
+    const t = snapToFrame(Math.max(0, time ?? s.playhead), s.project.fps);
+    const existing = s.project.markers ?? [];
+    const nextIdx = existing.length + 1;
+    const marker: TimelineMarker = {
+      id: id(),
+      time: t,
+      label: label?.trim() || `Marker ${nextIdx}`,
+      color,
+    };
+    const markers = [...existing, marker].sort((a, b) => a.time - b.time);
+    get().commit({ ...s.project, markers });
+  },
+  updateMarker: (markerId, patch) => {
+    const s = get();
+    const existing = s.project.markers ?? [];
+    if (!existing.some((m) => m.id === markerId)) return;
+    const markers = existing
+      .map((m) =>
+        m.id === markerId
+          ? {
+              ...m,
+              ...patch,
+              time:
+                patch.time !== undefined
+                  ? snapToFrame(Math.max(0, patch.time), s.project.fps)
+                  : m.time,
+              label:
+                patch.label !== undefined
+                  ? patch.label.trim() || m.label
+                  : m.label,
+            }
+          : m,
+      )
+      .sort((a, b) => a.time - b.time);
+    get().commit({ ...s.project, markers });
+  },
+  removeMarker: (markerId) => {
+    const s = get();
+    const existing = s.project.markers ?? [];
+    if (!existing.some((m) => m.id === markerId)) return;
+    get().commit({
+      ...s.project,
+      markers: existing.filter((m) => m.id !== markerId),
+    });
+  },
+  toggleTrackSolo: (trackId) => {
+    const p = get().project;
+    const track = p.tracks.find((t) => t.id === trackId);
+    if (!track) return;
+    get().commit({
+      ...p,
+      tracks: p.tracks.map((t) =>
+        t.id === trackId ? { ...t, solo: !t.solo } : t,
+      ),
+    });
   },
   addTrack: (kind) => {
     const p = get().project,

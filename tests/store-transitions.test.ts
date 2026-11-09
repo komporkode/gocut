@@ -68,7 +68,7 @@ describe('useEditorStore transitions', () => {
     store.redo();
     const pRedo = useEditorStore.getState().project;
     expect(pRedo.transitions).toHaveLength(1);
-    expect(pRedo.clips.find((c) => c.id === 'c2')!.start).toBe(3);
+    expect(pRedo.clips.find((c) => c.id === 'c2')!.start).toBe(3.5);
   });
 
   it('resizes transition and supports undo', () => {
@@ -80,7 +80,7 @@ describe('useEditorStore transitions', () => {
 
     store.resizeTransitionRecord(transId, 1.5);
     expect(useEditorStore.getState().project.transitions![0].duration).toBe(1.5);
-    expect(useEditorStore.getState().project.clips.find((c) => c.id === 'c2')!.start).toBe(2.5);
+    expect(useEditorStore.getState().project.clips.find((c) => c.id === 'c2')!.start).toBeCloseTo(3.266, 2);
 
     store.undo();
     expect(useEditorStore.getState().project.transitions![0].duration).toBe(1.0);

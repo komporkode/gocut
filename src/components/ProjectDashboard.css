@@ -367,30 +367,18 @@
   position: absolute;
   top: 40px;
   right: 8px;
-  background: #181924;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(139, 92, 246, 0.25);
+  background: #202020 !important;
+  border: 1px solid #3c404b !important;
+  border-radius: 8px !important;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.35) !important;
   z-index: 100;
-  min-width: 164px;
+  min-width: 170px;
   padding: 5px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  animation: contextMenuFadeIn 0.12s ease-out;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-}
-
-@keyframes contextMenuFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  animation: gocutMenuFadeIn 0.12s ease-out;
+  user-select: none;
 }
 
 .context-menu-item {
@@ -401,13 +389,15 @@
   gap: 10px;
   width: 100%;
   box-sizing: border-box;
-  padding: 8px 10px !important;
+  padding: 7px 10px !important;
   background: transparent;
   border: none;
-  color: #e2e8f0;
-  font-size: 13px;
+  outline: none;
+  color: #d1d5db;
+  font-size: 12px;
+  font-family: inherit;
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: 5px;
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
   user-select: none;
@@ -415,8 +405,8 @@
 
 .context-menu-item svg {
   flex-shrink: 0;
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   color: #94a3b8;
   display: inline-flex;
   align-items: center;
@@ -430,19 +420,22 @@
   white-space: nowrap;
 }
 
-.context-menu-item:hover {
-  background: rgba(139, 92, 246, 0.16) !important;
+.context-menu-item:hover,
+.context-menu-item:focus-visible {
+  background: rgba(255, 255, 255, 0.08) !important;
   color: #ffffff !important;
+  outline: none !important;
 }
 
-.context-menu-item:hover svg {
-  color: #c084fc;
+.context-menu-item:hover svg,
+.context-menu-item:focus-visible svg {
+  color: #ffffff;
 }
 
 .context-menu-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
-  margin: 4px 6px;
+  background: #373a44;
+  margin: 4px 0;
 }
 
 .context-menu-item.danger {
@@ -451,6 +444,17 @@
 
 .context-menu-item.danger svg {
   color: #f87171 !important;
+}
+
+.context-menu-item.danger:hover,
+.context-menu-item.danger:focus-visible {
+  background: rgba(239, 68, 68, 0.15) !important;
+  color: #fca5a5 !important;
+}
+
+.context-menu-item.danger:hover svg,
+.context-menu-item.danger:focus-visible svg {
+  color: #fca5a5 !important;
 }
 
 .context-menu-item.danger:hover {

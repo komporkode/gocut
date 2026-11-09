@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,13 @@ func TestUserProjectExport(t *testing.T) {
 	content, err := os.ReadFile(autosavePath)
 	if err != nil {
 		t.Skipf("Autosave file not found: %v", err)
+	}
+
+	var draft struct {
+		Clips []any `json:"clips"`
+	}
+	if err := json.Unmarshal(content, &draft); err != nil || len(draft.Clips) == 0 {
+		t.Skip("Autosave has no clips to export")
 	}
 
 	dummyDir := filepath.Join(os.TempDir(), "reacut_test_fixtures")
@@ -276,6 +284,113 @@ func TestUserProjectExport(t *testing.T) {
 		}
 		if !hasBitrate {
 			t.Errorf("Expected -b:v 12M in args, got: %v", args)
+		}
+	})
+
+	t.Run("ProEffectsAndAdjustmentLayerFilterComplex", func(t *testing.T) {
+		tempDir := t.TempDir()
+		outputFile := filepath.ToSlash(filepath.Join(tempDir, "pro_effects.mp4"))
+		projJSON := `{
+			"width": 1920,
+			"height": 1080,
+			"fps": 30,
+			"assets": [
+				{"id":"a1","name":"v.png","path":"` + filepath.ToSlash(dummyPng) + `","kind":"image","duration":5,"width":1920,"height":1080,"fps":30,"hasAudio":false}
+			],
+			"tracks": [
+				{"id":"v2","name":"V2 Adj","kind":"video","muted":false,"hidden":false,"solo":false},
+				{"id":"v1","name":"V1 Base","kind":"video","muted":false,"hidden":false,"solo":false}
+			],
+			"clips": [
+				{
+					"id":"c1","trackId":"v1","assetId":"a1","name":"c1","start":0,"duration":5,"sourceIn":0,"speed":1,
+					"effects":{
+						"grain":{"enabled":true,"preset":"kodak-35mm","engine":"analog","movement":"dynamic","intensity":40,"grainSize":"medium"},
+						"blur":{"enabled":true,"type":"motion","radius":12,"angle":45},
+						"stylize":{"enabled":true,"vignette":35,"chromaticAberration":8,"scanlines":0,"bloom":20,"sharpen":30}
+					}
+				},
+				{
+					"id":"adj1","trackId":"v2","name":"Adjustment Layer","start":1,"duration":3,"sourceIn":0,"speed":1,
+					"isAdjustmentLayer":true,
+					"adjustments":{"brightness":0.1,"contrast":1.2,"saturation":1.1,"blur":4}
+				}
+			]
+		}`
+		optsJSON := `{"path":"` + outputFile + `","codec":"hevc","encoder":"cpu","bitrate":"12M"}`
+
+		_, _, args, err := app.BuildExportArgs(projJSON, optsJSON)
+		if err != nil {
+			t.Fatalf("BuildExportArgs error: %v", err)
+		}
+
+		joined := strings.Join(args, " ")
+		for _, expected := range []string{"noise=alls=", "dblur=angle=45", "rgbashift=", "vignette=", "split=2[adj_raw_", "libx265"} {
+			if !strings.Contains(joined, expected) {
+				t.Errorf("Expected %q in export args, got: %s", expected, joined)
+			}
+		}
+	})
+
+	t.Run("BlendModeCompositingFilterComplex", func(t *testing.T) {
+		tempDir := t.TempDir()
+		outputFile := filepath.ToSlash(filepath.Join(tempDir, "blend_mode.mp4"))
+		projJSON := `{
+			"width": 1920,
+			"height": 1080,
+			"fps": 30,
+			"assets": [
+				{"id":"a1","name":"v.png","path":"` + filepath.ToSlash(dummyPng) + `","kind":"image","duration":5,"width":1920,"height":1080,"fps":30,"hasAudio":false}
+			],
+			"tracks": [
+				{"id":"v2","name":"V2 Overlay","kind":"video","muted":false,"hidden":false,"solo":false},
+				{"id":"v1","name":"V1 Base","kind":"video","muted":false,"hidden":false,"solo":false}
+			],
+			"clips": [
+				{"id":"c1","trackId":"v1","assetId":"a1","name":"c1","start":0,"duration":5,"sourceIn":0,"speed":1},
+				{"id":"c2","trackId":"v2","assetId":"a1","name":"c2","start":1,"duration":3,"sourceIn":0,"speed":1,"blendMode":"screen"}
+			]
+		}`
+		optsJSON := `{"path":"` + outputFile + `","encoder":"cpu"}`
+
+		_, _, args, err := app.BuildExportArgs(projJSON, optsJSON)
+		if err != nil {
+			t.Fatalf("BuildExportArgs error: %v", err)
+		}
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "blend=all_mode=screen") {
+			t.Errorf("Expected blend=all_mode=screen in export args when clip.blendMode is screen, got: %s", joined)
+		}
+	})
+
+	t.Run("AudioOnlyMp3Export", func(t *testing.T) {
+		tempDir := t.TempDir()
+		outputFile := filepath.ToSlash(filepath.Join(tempDir, "audio_only.mp3"))
+		projJSON := `{"width":1920,"height":1080,"fps":30,"clips":[],"tracks":[]}`
+		optsJSON := `{"path":"` + outputFile + `","format":"mp3","duration":3}`
+
+		_, _, args, err := app.BuildExportArgs(projJSON, optsJSON)
+		if err != nil {
+			t.Fatalf("BuildExportArgs error: %v", err)
+		}
+		joined := strings.Join(args, " ")
+		if !strings.Contains(joined, "-vn") || !strings.Contains(joined, "libmp3lame") {
+			t.Errorf("Expected -vn and libmp3lame in MP3 export args, got: %s", joined)
+		}
+	})
+
+	t.Run("SaveMediaCachePathTraversalGuard", func(t *testing.T) {
+		savedPath, err := app.SaveMediaCache("../../evil_escape.png", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+		if err != nil {
+			t.Fatalf("SaveMediaCache returned unexpected error: %v", err)
+		}
+		defer os.Remove(savedPath)
+		cacheRoot := filepath.Join(storage.GetCacheDir(), "media")
+		if filepath.Dir(savedPath) != cacheRoot {
+			t.Errorf("Path traversal escaped cacheDir! got dir=%s, expected=%s", filepath.Dir(savedPath), cacheRoot)
+		}
+		if filepath.Base(savedPath) != "evil_escape.png" {
+			t.Errorf("Expected basename evil_escape.png, got %s", filepath.Base(savedPath))
 		}
 	})
 }

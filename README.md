@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.8.0-blue?style=flat-square" alt="Version: v0.8.0-beta" />
+  <img src="https://img.shields.io/badge/version-v0.9.0-blue?style=flat-square" alt="Version: v0.9.0-beta" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-45d6c0?style=flat-square" alt="License: MIT" /></a>
   <img src="https://img.shields.io/badge/backend-Go_1.23+_·_Wails_v2-00ADD8?style=flat-square" alt="Backend: Go & Wails" />
   <img src="https://img.shields.io/badge/frontend-React_19_·_TypeScript_·_Vite-61DAFB?style=flat-square" alt="Frontend: React & Vite" />
@@ -43,7 +43,7 @@ GoCut is an independently enhanced fork of [**ReaCut**](https://github.com/Xiang
 
 While upstream ReaCut provided a solid prototype on macOS using Electron, GoCut completely overhauls the engine and expands the editing capabilities:
 
-| Aspect | Original ReaCut | GoCut (v0.8.0-beta) |
+| Aspect | Original ReaCut | GoCut (v0.9.0-beta) |
 |---|---|---|
 | **Runtime Architecture** | Electron (Chromium + Node.js multi-process) | **Go 1.23+ and Wails v2** (native OS Webview, ultra-lightweight) |
 | **Memory & Performance** | Heavy memory footprint; high idle resource usage | **Low RAM overhead**, instant cold boot, native Go subprocess execution |
@@ -156,6 +156,9 @@ Beyond the developer sanity check, here is why Go was the deliberate architectur
 | `Ctrl + Shift + Z` / `Cmd + Shift + Z` | Redo |
 | `Ctrl + Scroll` / `Cmd + Scroll` | Zoom timeline centered on playhead |
 | `I` / `O` | Mark In / Out points in Source Preview |
+| `M` | **Add Timeline Marker** at current playhead position |
+| `Ctrl + Alt + C` | **Copy Effects / Attributes** from selected clip |
+| `Ctrl + Alt + V` | **Paste Effects / Attributes** to selected clip(s) |
 
 ---
 
