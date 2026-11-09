@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      (() => {
+        try {
+          const pref = localStorage.getItem("color-scheme") ?? "light dark";
+          const meta = document.head.querySelector('meta[name="color-scheme"]');
+          if (meta) meta.setAttribute("content", pref);
+          if (pref === "light" || pref === "dark") {
+            document.documentElement.setAttribute("data-theme", pref);
+          }
+          const lang = localStorage.getItem("gocut-site-lang");
+          if (lang === "id" || lang === "en") {
+            document.documentElement.lang = lang;
+          }
+        } catch {}
+      })();
+    </script>
+    <title>GoCut: Editor Video Desktop Luring, Ringan &amp; Sumber Terbuka</title>
+    <meta
+      name="description"
+      content="Unduh GoCut: editor video desktop luring berbasis Go, Wails v2, React 19, dan FFmpeg lokal. Fork independen dari ReaCut dengan Film Grain 60 FPS, Whisper AI lokal, dan penyimpanan drive mandiri."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="GoCut: Editor Video Desktop Luring &amp; Ringan" />
+    <meta
+      property="og:description"
+      content="Editor video desktop open-source berbasis Go, Wails v2, React, dan FFmpeg lokal. Tanpa login wajib, tanpa telemetri, dengan kredit penuh ke ReaCut."
+    />
+    <meta property="og:image" content="/screenshots/gocut-editor.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="/icons/gocut.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content" data-i18n="nav.skip">Lewati ke konten utama</a>
+
+    <header class="site-header" id="top">
+      <div class="container header-inner">
+        <a class="brand-link" href="#top" aria-label="GoCut Beranda">
+          <img class="brand-icon" src="/icons/gocut.png" width="32" height="32" alt="" />
+          <span class="brand-name">GoCut</span>
+          <span class="brand-version" id="header-version-tag">v0.9.0-beta</span>
+        </a>
+
+        <nav class="desktop-nav" aria-label="Utama">
+          <a href="#downloads" data-i18n="nav.downloads">Unduh</a>
+          <a href="#features" data-i18n="nav.features">Kemampuan</a>
+          <a href="#architecture" data-i18n="nav.architecture">Evolusi Fork</a>
+          <a href="#changelog" data-i18n="nav.changelog">Rilis</a>
+          <a href="#credits" data-i18n="nav.credits">Kredit Fork</a>
+        </nav>
+
+        <div class="header-controls">
+          <button
+            type="button"
+            id="lang-toggle"
+            class="control-btn mono"
+            aria-label="Ganti bahasa tampilan"
+          >
+            ID / EN
+          </button>
+
+          <button
+            type="button"
+            id="theme-toggle"
+            class="control-btn"
+            aria-label="Ganti tema gelap atau terang"
+            aria-pressed="false"
+          >
+            <svg class="icon-svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <circle cx="12" cy="12" r="4"></circle>
+              <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"></path>
+            </svg>
+            <span id="theme-toggle-label">Tema</span>
+          </button>
+
+          <button
+            type="button"
+            id="drawer-open-btn"
+            class="control-btn mobile-menu-btn"
+            aria-controls="mobile-nav-drawer"
+            aria-expanded="false"
+            aria-label="Buka menu navigasi"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M4 6h16M4 12h16M4 18h16"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div id="drawer-backdrop" class="drawer-backdrop" hidden></div>
+    <aside
+      id="mobile-nav-drawer"
+      class="mobile-drawer"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="drawer-title"
+      hidden
+    >
+      <div class="drawer-header">
+        <span id="drawer-title" class="drawer-title">Menu GoCut</span>
+        <button type="button" id="drawer-close-btn" class="control-btn" aria-label="Tutup menu navigasi">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path d="M18 6L6 18M6 6l12 12"></path>
+          </svg>
+        </button>
+      </div>
+      <nav class="drawer-nav" aria-label="Seluler">
+        <a href="#downloads" data-i18n="nav.downloads">Unduh</a>
+        <a href="#features" data-i18n="nav.features">Kemampuan</a>
+        <a href="#architecture" data-i18n="nav.architecture">Evolusi Fork</a>
+        <a href="#changelog" data-i18n="nav.changelog">Catatan Rilis</a>
+        <a href="#credits" data-i18n="nav.credits">Kredit Fork Asli</a>
+        <a href="https://github.com/komporkode/gocut" target="_blank" rel="noopener noreferrer">GitHub Repository</a>
+      </nav>
+    </aside>
+
+    <main id="main-content">
+      <!-- Section 1: Asymmetric Hero -->
+      <section class="hero-section">
+        <div class="container hero-grid">
+          <div class="hero-copy">
+            <h1 data-i18n="hero.title">
+              Editor video desktop luring. Ringan tanpa bergantung cloud.
+            </h1>
+            <p class="hero-lead" data-i18n="hero.lead">
+              GoCut memindahkan arsitektur pengeditan multi-trek ke binary Go 1.23 dan Wails v2 dengan antarmuka React 19 serta ekspor FFmpeg lokal. Fork independen dari proyek open-source ReaCut di bawah lisensi MIT.
+            </p>
+
+            <div class="hero-actions">
+              <a class="btn btn-primary" id="hero-download-cta" href="#downloads">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                <span data-i18n="hero.ctaPrimary">Unduh untuk Windows (x64)</span>
+              </a>
+              <a
+                class="btn btn-secondary"
+                href="https://github.com/komporkode/gocut"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <span data-i18n="hero.ctaSource">Kode Sumber GitHub</span>
+              </a>
+            </div>
+
+            <dl class="hero-specs">
+              <div>
+                <dt data-i18n="hero.specRuntimeLabel">Runtime Desktop</dt>
+                <dd class="mono">Go 1.23 + Wails v2</dd>
+              </div>
+              <div>
+                <dt data-i18n="hero.specPrivacyLabel">Jaringan &amp; Telemetri</dt>
+                <dd data-i18n="hero.specPrivacyVal">Luring penuh, tanpa akun</dd>
+              </div>
+              <div>
+                <dt data-i18n="hero.specOriginLabel">Garis Keturunan</dt>
+                <dd>
+                  <a href="#credits" data-i18n="hero.specOriginVal">Fork dari ReaCut (MIT)</a>
+                </dd>
+              </div>
+            </dl>
+          </div>
+
+          <figure class="hero-media">
+            <button
+              type="button"
+              class="shot-trigger"
+              data-lightbox-src="/screenshots/gocut-editor.png"
+              data-lightbox-title-key="shots.editor.title"
+              data-lightbox-caption-key="shots.editor.caption"
+              aria-label="Perbesar tangkapan layar Editor GoCut v0.9.0-beta"
+            >
+              <img
+                src="/screenshots/gocut-editor.png"
+                width="1600"
+                height="960"
+                fetchpriority="high"
+                decoding="sync"
+                alt="Antarmuka editor GoCut v0.9.0-beta dengan kanvas pratinjau Film Grain Kodak 35mm, timeline empat trek, dan panel pengaturan efek di sebelah kanan."
+              />
+              <span class="shot-zoom-hint" data-i18n="shots.zoomHint">Klik untuk perbesar (1600 x 960)</span>
+            </button>
+            <figcaption data-i18n="shots.editor.caption">
+              Tangkapan layar langsung GoCut v0.9.0-beta dengan proyek uji sintetis aset bawaan: Film Grain Kodak 35mm, Adjustment Layer, dan penanda timeline aktif.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <!-- Section 2: Release Downloads & SHA-256 Verifier -->
+      <section id="downloads" class="section-band section-alt">
+        <div class="container">
+          <div class="section-header-row">
+            <div>
+              <h2 data-i18n="downloads.heading">Paket Rilis &amp; Verifikasi Checksum</h2>
+              <p class="section-sub" data-i18n="downloads.subheading">
+                Mengambil data rilis terbaru langsung dari GitHub Releases komporkode/gocut dengan cadangan manifest terverifikasi.
+              </p>
+            </div>
+            <div class="release-status-box" aria-live="polite">
+              <span id="release-status-text" class="status-note">Memeriksa GitHub Releases...</span>
+              <button type="button" id="refresh-releases-btn" class="btn btn-small btn-secondary" data-i18n="downloads.refresh">
+                Muat Ulang
+              </button>
+            </div>
+          </div>
+
+          <div class="stage-notice" id="staging-banner">
+            <strong data-i18n="downloads.stageTitle">Catatan Status Rilis:</strong>
+            <span data-i18n="downloads.stageBody">
+              Unduhan biner Windows terpublikasi saat ini adalah v0.8.0 (Prerelease) dan v0.7.0 (Stable). Pembaruan v0.9.0-beta sudah tersedia di CHANGELOG.md cabang repo utama dan dapat dikompilasi dari sumber sampai tag biner berikutnya diterbitkan.
+            </span>
+          </div>
+
+          <!-- Platform Tablist -->
+          <div class="tablist" role="tablist" aria-label="Pilih platform unduhan" id="platform-tablist">
+            <button
+              type="button"
+              role="tab"
+              id="tab-win"
+              aria-selected="true"
+              aria-controls="panel-win"
+              tabindex="0"
+              data-i18n="downloads.tabWindows"
+            >
+              Windows x64 (Biner)
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="tab-source"
+              aria-selected="false"
+              aria-controls="panel-source"
+              tabindex="-1"
+              data-i18n="downloads.tabSource"
+            >
+              macOS &amp; Linux (Bangun dari Sumber)
+            </button>
+          </div>
+
+          <!-- Panel Windows -->
+          <div id="panel-win" role="tabpanel" aria-labelledby="tab-win" class="tab-panel">
+            <div class="release-meta-bar" id="active-release-meta">
+              <span class="mono" id="active-release-tag">v0.8.0 (Prerelease)</span>
+              <span id="active-release-date">Dirilis 1 Nov 2026</span>
+              <a
+                id="active-release-link"
+                href="https://github.com/komporkode/gocut/releases/tag/v0.8.0"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-i18n="downloads.viewOnGithub"
+              >
+                Lihat Halaman Rilis di GitHub
+              </a>
+            </div>
+
+            <div class="installer-list" id="installer-list">
+              <!-- Populated and updated by src/main.ts -->
+            </div>
+
+            <div class="checksum-verify-note">
+              <span class="mono" data-i18n="downloads.verifyCmdLabel">Verifikasi PowerShell:</span>
+              <code class="mono">Get-FileHash .\GoCut-Setup-x64.exe -Algorithm SHA256</code>
+            </div>
+          </div>
+
+          <!-- Panel macOS & Linux -->
+          <div id="panel-source" role="tabpanel" aria-labelledby="tab-source" class="tab-panel" hidden>
+            <div class="source-build-box">
+              <h3 data-i18n="source.heading">Kompilasi Mandiri untuk macOS dan Linux</h3>
+              <p data-i18n="source.desc">
+                Arsip biner macOS universal dan AppImage Linux untuk v0.8.0/v0.9.0-beta belum diterbitkan di GitHub Releases. Anda dapat membangun binary asli langsung dari kode sumber memakai Go, Node.js, Wails v2, dan FFmpeg lokal.
+              </p>
+              <div class="source-prereqs">
+                <strong data-i18n="source.prereqTitle">Kebutuhan Sistem:</strong>
+                <span class="mono">Go 1.23+, Node.js 20+, Wails CLI v2, FFmpeg &amp; FFprobe di PATH</span>
+              </div>
+              <pre class="code-block"><code>git clone https://github.com/komporkode/gocut.git
+cd gocut
+npm ci
+wails build -clean</code></pre>
+              <p class="muted-note" data-i18n="source.workflowNote">
+                Untuk macOS universal, lihat alur kompilasi di berkas .github/workflows/release.yml.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 3: Studio Capabilities (Alternating Editorial Plates) -->
+      <section id="features" class="section-band">
+        <div class="container">
+          <h2 class="section-title-standalone" data-i18n="features.heading">
+            Dirancang untuk Editing Lokal Tanpa Menguras Ruang Drive C:
+          </h2>
+
+          <!-- Plate 1 -->
+          <article class="feature-plate">
+            <div class="plate-text">
+              <span class="plate-index mono">01 / WORKSPACE &amp; STORAGE</span>
+              <h3 data-i18n="features.p1Title">Penyimpanan Drive Mandiri &amp; Whisper AI Luring</h3>
+              <p data-i18n="features.p1Body">
+                Pilih lokasi penyimpanan proyek dan cache render di drive pilihan Anda (misalnya D:\GoCut\data\) dengan opsi pemindahan data satu klik. Mode portabel berjalan mandiri dari folder instalasi tanpa menulis ke registry Windows atau %APPDATA%.
+              </p>
+              <ul class="fact-list">
+                <li data-i18n="features.p1Item1">Server streaming HTTP 206 byte-range internal untuk scrubbing cepat tanpa lag.</li>
+                <li data-i18n="features.p1Item2">Transkripsi suara ke teks via C++ whisper.cpp luring (tiny 75 MB, base 145 MB, small 480 MB) serta impor file .bin GGML sendiri.</li>
+                <li data-i18n="features.p1Item3">Pemulihan autosave proyek tervalidasi skema v1 agar file proyek lama tetap terbaca utuh.</li>
+              </ul>
+            </div>
+            <figure class="plate-media">
+              <button
+                type="button"
+                class="shot-trigger"
+                data-lightbox-src="/screenshots/gocut-dashboard.png"
+                data-lightbox-title-key="shots.dashboard.title"
+                data-lightbox-caption-key="shots.dashboard.caption"
+                aria-label="Perbesar tangkapan layar Dasbor Proyek GoCut"
+              >
+                <img
+                  src="/screenshots/gocut-dashboard.png"
+                  width="1600"
+                  height="960"
+                  loading="lazy"
+                  alt="Dasbor Proyek GoCut menampilkan proyek uji sintetis dengan pencarian instan, filter urutan, dan aksi duplikat proyek."
+                />
+                <span class="shot-zoom-hint" data-i18n="shots.zoomHint">Klik untuk perbesar (1600 x 960)</span>
+              </button>
+              <figcaption data-i18n="shots.dashboard.caption">
+                Dasbor proyek GoCut dengan pencarian waktu nyata, rasio aspek siap pilih (16:9, 9:16, 1:1, 4:5), dan pemisahan penyimpanan proyek.
+              </figcaption>
+            </figure>
+          </article>
+
+          <!-- Plate 2 -->
+          <article class="feature-plate plate-reversed">
+            <div class="plate-text">
+              <span class="plate-index mono">02 / COMPOSITOR &amp; EXPORT ENGINE</span>
+              <h3 data-i18n="features.p2Title">Efek Film Grain 60 FPS &amp; 6 Preset Ekspor Sekali Klik</h3>
+              <p data-i18n="features.p2Body">
+                Pratinjau Canvas 60 FPS di GoCut v0.9.0-beta memanfaatkan Lookup Table pra-komputasi (SIN_LUMA_LUT 256 entri dan NOISE_TABLE 4096 entri) bebas alokasi GC sehingga tekstur butiran film tetap mulus sekaligus identik saat dirender ke FFmpeg.
+              </p>
+              <ul class="fact-list">
+                <li data-i18n="features.p2Item1">8 emulsi Film Grain (Kodak 35mm, Fuji Eterna, 16mm Analog, Super 8mm, CRT/VHS) plus Gaussian, Motion, dan Radial Blur.</li>
+                <li data-i18n="features.p2Item2">7 Layer Blend Modes (Screen, Multiply, Overlay, Soft/Hard Light, Color Dodge) dan klip Adjustment Layer multi-lapisan.</li>
+                <li data-i18n="features.p2Item3">6 preset ekspor sekali klik (YouTube 4K, 1080p, TikTok/Reels, H.265 Hemat, WhatsApp/Web, Audio Only MP3/WAV) dengan deteksi NVENC, QSV, dan AMF.</li>
+              </ul>
+            </div>
+            <figure class="plate-media">
+              <button
+                type="button"
+                class="shot-trigger"
+                data-lightbox-src="/screenshots/gocut-export.png"
+                data-lightbox-title-key="shots.export.title"
+                data-lightbox-caption-key="shots.export.caption"
+                aria-label="Perbesar tangkapan layar Dialog Ekspor GoCut"
+              >
+                <img
+                  src="/screenshots/gocut-export.png"
+                  width="1600"
+                  height="960"
+                  loading="lazy"
+                  alt="Dialog Ekspor Video GoCut menampilkan 6 preset platform, pemilih codec H.264 dan H.265, akselerasi GPU, dan estimasi ukuran berkas."
+                />
+                <span class="shot-zoom-hint" data-i18n="shots.zoomHint">Klik untuk perbesar (1600 x 960)</span>
+              </button>
+              <figcaption data-i18n="shots.export.caption">
+                Dialog Ekspor v0.9.0-beta: enam preset platform siap pakai, codec H.264/H.265, akselerasi GPU otomatis, dan perkiraan ukuran hasil render.
+              </figcaption>
+            </figure>
+          </article>
+        </div>
+      </section>
+
+      <!-- Section 4: Fork Evolution Comparison Table (Responsive Container Query) -->
+      <section id="architecture" class="section-band section-alt">
+        <div class="container">
+          <h2 id="arch-heading" data-i18n="arch.heading">Evolusi Arsitektur: ReaCut ke GoCut</h2>
+          <p class="section-sub" data-i18n="arch.subheading">
+            Ringkasan perubahan arsitektur utama setelah memindahkan runtime dari Electron/Node.js ke Go 1.23 dan Wails v2.
+          </p>
+
+          <div class="table-wrap" tabindex="0" role="region" aria-labelledby="arch-heading">
+            <table class="spec-table">
+              <caption class="visually-hidden" data-i18n="arch.caption">Perbandingan arsitektur antara ReaCut asli dan GoCut</caption>
+              <thead>
+                <tr>
+                  <th scope="col" data-i18n="arch.colLayer">Komponen</th>
+                  <th scope="col" data-i18n="arch.colOrigin">Basis ReaCut Asli</th>
+                  <th scope="col" data-i18n="arch.colGocut">GoCut (v0.9.0-beta)</th>
+                </tr>
+              </thead>
+              <tbody id="arch-tbody">
+                <tr>
+                  <th scope="row" class="cell-strong" data-i18n="arch.r1Col1">Host Runtime</th>
+                  <td data-i18n="arch.r1Col2">Electron + proses Node.js IPC</td>
+                  <td data-i18n="arch.r1Col3">Binary tunggal Go 1.23 + Wails v2 WebView2</td>
+                </tr>
+                <tr>
+                  <th scope="row" class="cell-strong" data-i18n="arch.r2Col1">Streaming Media</th>
+                  <td data-i18n="arch.r2Col2">Protokol kustom Electron file bridge</td>
+                  <td data-i18n="arch.r2Col3">Server HTTP 206 byte-range terisolasi internal</td>
+                </tr>
+                <tr>
+                  <th scope="row" class="cell-strong" data-i18n="arch.r3Col1">Penyimpanan Data</th>
+                  <td data-i18n="arch.r3Col2">Direktori userData bawaan OS (C:)</td>
+                  <td data-i18n="arch.r3Col3">Custom Drive (D:\GoCut\data\), mode portabel, pindah drive 1 klik</td>
+                </tr>
+                <tr>
+                  <th scope="row" class="cell-strong" data-i18n="arch.r4Col1">Auto-Subtitle</th>
+                  <td data-i18n="arch.r4Col2">Subproses Python mlx-whisper (macOS)</td>
+                  <td data-i18n="arch.r4Col3">whisper.cpp C++ lokal (tiny/base/small) + impor file .bin GGML</td>
+                </tr>
+                <tr>
+                  <th scope="row" class="cell-strong" data-i18n="arch.r5Col1">Efek &amp; Ekspor</th>
+                  <td data-i18n="arch.r5Col2">Koreksi warna dasar, fade, crop, mask, transisi</td>
+                  <td data-i18n="arch.r5Col3">Film Grain LUT, Adjustment Layer, 7 Blend Modes, H.265 HEVC &amp; GPU</td>
+                </tr>
+                <tr>
+                  <th scope="row" class="cell-strong" data-i18n="arch.r6Col1">Distribusi Windows</th>
+                  <td data-i18n="arch.r6Col2">Fokus paket DMG macOS</td>
+                  <td data-i18n="arch.r6Col3">Inno Setup x64 Offline, Go WebSetup &lt; 3 MB, dan ZIP portabel</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Section 5: Interactive Changelog Tabs & Keyboard Workflow -->
+      <section id="changelog" class="section-band">
+        <div class="container changelog-layout">
+          <div class="changelog-column">
+            <h2 data-i18n="changelog.heading">Catatan Rilis</h2>
+            <div class="tablist" role="tablist" aria-label="Pilih versi catatan rilis" id="changelog-tablist">
+              <button type="button" role="tab" id="tab-v090" aria-selected="true" aria-controls="panel-v090" tabindex="0">
+                v0.9.0-beta
+              </button>
+              <button type="button" role="tab" id="tab-v080" aria-selected="false" aria-controls="panel-v080" tabindex="-1">
+                v0.8.0
+              </button>
+              <button type="button" role="tab" id="tab-v070" aria-selected="false" aria-controls="panel-v070" tabindex="-1">
+                v0.7.0
+              </button>
+            </div>
+
+            <div id="panel-v090" role="tabpanel" aria-labelledby="tab-v090" class="changelog-panel">
+              <div class="changelog-meta mono">2026-11-05 · Pro Effects, Compositing &amp; Export Suite</div>
+              <ul class="fact-list" id="changelog-list-v090">
+                <li data-i18n="cl.v090.1">Film Grain &amp; Sensor Texture Suite: 8 preset emulsi dengan kurva proteksi sorotan sin(L*pi) dan dispersi RGB.</li>
+                <li data-i18n="cl.v090.2">Suite Blur (Gaussian, Motion 360 derajat, Radial) dan Stylize (Vignette, Chromatic Aberration, Scanlines, Bloom, Sharpen).</li>
+                <li data-i18n="cl.v090.3">Adjustment Layer terpadu dan 7 Layer Blend Modes dengan paritas pratinjau Canvas terhadap filter blend FFmpeg.</li>
+                <li data-i18n="cl.v090.4">Copy/Paste Attributes (Ctrl+Alt+C / V), Timeline Markers (M), Track Solo (S), serta 6 preset ekspor 1-klik dengan NVENC/QSV/AMF.</li>
+                <li data-i18n="cl.v090.5">Keamanan: sanitasi path traversal pada SaveMediaCache dan deduplikasi kontrol ProEffectsControls.</li>
+              </ul>
+            </div>
+
+            <div id="panel-v080" role="tabpanel" aria-labelledby="tab-v080" class="changelog-panel" hidden>
+              <div class="changelog-meta mono">2026-11-01 · Storage Isolation, Whisper AI &amp; Dual Installer</div>
+              <ul class="fact-list">
+                <li data-i18n="cl.v080.1">Custom Drive Storage (&lt;Drive&gt;:\GoCut\data\) dengan deteksi mode portabel otomatis dan fitur RelocateStorage 1-klik.</li>
+                <li data-i18n="cl.v080.2">WhisperManager C++ untuk model GGML tiny (~75 MB), base (~145 MB), small (~480 MB) dan impor file .bin offline.</li>
+                <li data-i18n="cl.v080.3">Dual installer Windows: GoCut-Setup-x64.exe (Inno Setup 6) dan GoCut-WebSetup.exe (&lt; 3 MB berbasis Go).</li>
+                <li data-i18n="cl.v080.4">Perbaikan validasi pemulihan proyek v1 serta pesan kesalahan lokal berbahasa Indonesia yang jelas.</li>
+              </ul>
+            </div>
+
+            <div id="panel-v070" role="tabpanel" aria-labelledby="tab-v070" class="changelog-panel" hidden>
+              <div class="changelog-meta mono">2026-10-26 · Creative Suite, Compound Timeline &amp; Audio Separation</div>
+              <ul class="fact-list">
+                <li data-i18n="cl.v070.1">Separate Audio &amp; Recover Audio untuk memisahkan audio dari klip video sambil mempertahankan penautan linkId.</li>
+                <li data-i18n="cl.v070.2">Compound Clips &amp; Sub-Timeline bersarang dengan navigasi breadcrumb dan pratinjau real-time.</li>
+                <li data-i18n="cl.v070.3">Drag-and-drop aset bawaan, kontrol transport 3-kolom presisi tengah, serta sinkronisasi 4 bahasa (ID, EN, ZH-CN, TR).</li>
+              </ul>
+            </div>
+          </div>
+
+          <aside class="shortcuts-column" aria-labelledby="shortcuts-heading">
+            <h2 id="shortcuts-heading" data-i18n="shortcuts.heading">Pintasan Papan Tombol</h2>
+            <p class="section-sub" data-i18n="shortcuts.sub">Pintasan inti untuk alur potong dan compositing cepat.</p>
+            <div class="table-wrap" tabindex="0" role="region" aria-labelledby="shortcuts-heading">
+              <table class="shortcuts-table">
+                <caption class="visually-hidden" data-i18n="shortcuts.caption">Daftar pintasan papan tombol inti GoCut</caption>
+                <thead>
+                  <tr>
+                    <th scope="col" data-i18n="shortcuts.colKey">Tombol</th>
+                    <th scope="col" data-i18n="shortcuts.colAction">Fungsi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><kbd>Space</kbd> / <kbd>J K L</kbd></td>
+                    <td data-i18n="shortcuts.r1">Putar, jeda, mundur, dan maju cepat</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>V</kbd> / <kbd>C</kbd></td>
+                    <td data-i18n="shortcuts.r2">Mode Pilih (Select) / Pisau Potong (Razor)</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>Q</kbd> / <kbd>W</kbd></td>
+                    <td data-i18n="shortcuts.r3">Ripple Trim pangkal kiri atau ujung kanan playhead</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>M</kbd> / <kbd>S</kbd></td>
+                    <td data-i18n="shortcuts.r4">Tambah penanda timeline / Solo trek aktif</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>Ctrl+Alt+C / V</kbd></td>
+                    <td data-i18n="shortcuts.r5">Salin dan tempel seluruh atribut efek klip</td>
+                  </tr>
+                  <tr>
+                    <td><kbd>Ctrl+B</kbd> / <kbd>Ctrl+E</kbd></td>
+                    <td data-i18n="shortcuts.r6">Belah klip di playhead / Buka dialog Ekspor</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- Section 6: Mandatory Original Fork Credit & Open-Source Stack -->
+      <section id="credits" class="section-band section-alt">
+        <div class="container">
+          <div class="credit-header">
+            <h2 data-i18n="credits.heading">Kredit Fork Asli &amp; Ekosistem Sumber Terbuka</h2>
+            <p class="section-sub" data-i18n="credits.subheading">
+              GoCut dibangun di atas fondasi riset dan rekayasa terbuka oleh komunitas berikut. Seluruh hak cipta dan lisensi asli tetap dipertahankan.
+            </p>
+          </div>
+
+          <div class="credits-grid">
+            <article class="credit-card credit-card-primary">
+              <div class="credit-role mono" data-i18n="credits.forkLabel">PROYEK INDUK / UPSTREAM FORK (MIT LICENSE)</div>
+              <h3>ReaCut</h3>
+              <p class="credit-authors">Xiangyu-CAS &amp; ReaCut contributors (Copyright (c) 2026 ReaCut contributors)</p>
+              <p data-i18n="credits.reacutDesc">
+                GoCut adalah fork independen dari ReaCut. Model proyek JSON tervalidasi, mesin evaluasi keyframe, compositing kanvas, editor timeline multi-trek, 64 aset bawaan orisinal, dan dasar interoperabilitas draf CapCut berasal dari basis kode MIT ReaCut yang kemudian diporting dari Electron ke Go + Wails.
+              </p>
+              <div class="credit-links">
+                <a href="https://github.com/Xiangyu-CAS/rea-capcut" target="_blank" rel="noopener noreferrer" data-i18n="credits.reacutLink">
+                  Repositori Asli ReaCut
+                </a>
+                <a href="https://github.com/komporkode/gocut/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">
+                  Lisensi MIT
+                </a>
+              </div>
+            </article>
+
+            <article class="credit-card">
+              <div class="credit-role mono" data-i18n="credits.researchLabel">RISET EKOSISTEM PENDUKUNG</div>
+              <h3>REA Project</h3>
+              <p class="credit-authors">morluto</p>
+              <p data-i18n="credits.reaDesc">
+                Dokumentasi riset perilaku dan format lokal pada modul REA (morluto/rea) menjadi rujukan penting pemahaman interoperabilitas draf sebelum implementasi mandiri pada kode ReaCut dan GoCut.
+              </p>
+              <div class="credit-links">
+                <a href="https://github.com/morluto/rea" target="_blank" rel="noopener noreferrer">
+                  github.com/morluto/rea
+                </a>
+              </div>
+            </article>
+          </div>
+
+          <div class="oss-ledger">
+            <h3 data-i18n="credits.stackHeading">Komponen Terbuka &amp; Jaminan Privasi</h3>
+            <ul class="oss-list">
+              <li>
+                <strong>Go 1.23+ &amp; Wails v2</strong>
+                <span data-i18n="credits.stackWails">Menjembatani backend asli dan jendela WebView2 sistem tanpa membundel Chromium terpisah.</span>
+              </li>
+              <li>
+                <strong>FFmpeg &amp; FFprobe (Eksternal Lokal)</strong>
+                <span data-i18n="credits.stackFfmpeg">Pemeriksaan media dan render ekspor dilakukan melalui argumen proses aman tanpa shell injection.</span>
+              </li>
+              <li>
+                <strong>whisper.cpp (GGML) &amp; React 19 + Zustand + Vite</strong>
+                <span data-i18n="credits.stackWhisper">Transkripsi luring lokal (model GGML base opsional) dan antarmuka reaktif. Font Noto Sans SC (SIL OFL 1.1) dan ikon Lucide (ISC).</span>
+              </li>
+              <li>
+                <strong>SignPath Foundation &amp; Privasi Tanpa Cloud</strong>
+                <span data-i18n="credits.stackSignpath">Penandatanganan kode sumber terbuka gratis didukung oleh SignPath Foundation (signpath.org). Zero telemetri, media tetap di perangkat Anda.</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div class="footer-brand-block">
+          <div class="footer-brand-row">
+            <img src="/icons/gocut.png" width="24" height="24" alt="" />
+            <strong>GoCut</strong>
+            <span class="mono" id="footer-version-badge">v0.9.0-beta</span>
+          </div>
+          <p data-i18n="footer.copy">
+            Perangkat lunak sumber terbuka berlisensi MIT. Fork independen dari ReaCut (Xiangyu-CAS) dengan riset REA (morluto).
+          </p>
+        </div>
+
+        <nav class="footer-links" aria-label="Tautan bawah">
+          <a href="https://github.com/komporkode/gocut" target="_blank" rel="noopener noreferrer">GitHub</a>
+          <a href="https://github.com/komporkode/gocut/releases" target="_blank" rel="noopener noreferrer">Releases</a>
+          <a href="https://github.com/Xiangyu-CAS/rea-capcut" target="_blank" rel="noopener noreferrer">ReaCut</a>
+          <a href="https://github.com/komporkode/gocut/blob/main/PRIVACY.md" target="_blank" rel="noopener noreferrer" data-i18n="footer.privacy">Privasi</a>
+        </nav>
+      </div>
+    </footer>
+
+    <!-- Native Modal Dialog for Screenshot Zoom -->
+    <dialog id="screenshot-lightbox" closedby="any" aria-labelledby="lightbox-title">
+      <div class="lightbox-frame">
+        <div class="lightbox-bar">
+          <h2 id="lightbox-title" class="lightbox-title">Pratinjau GoCut</h2>
+          <button type="button" id="lightbox-close-btn" class="control-btn" aria-label="Tutup pratinjau">
+            <span data-i18n="lightbox.close">Tutup</span>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path d="M18 6L6 18M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        <div class="lightbox-body">
+          <img id="lightbox-img" src="/screenshots/gocut-editor.png" width="1600" height="960" fetchpriority="low" alt="" />
+          <p id="lightbox-caption" class="lightbox-caption"></p>
+        </div>
+      </div>
+    </dialog>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

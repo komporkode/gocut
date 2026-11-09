@@ -1,0 +1,17 @@
+{
+  "name": "gocut-release-website",
+  "version": "0.9.0",
+  "private": true,
+  "description": "Official release website for GoCut: open-source offline desktop video editor forked from ReaCut.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4173",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "vite": "^6.1.0"
+  }
+}
