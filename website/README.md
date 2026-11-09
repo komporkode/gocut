@@ -24,7 +24,7 @@ npm --prefix website run preview
    - **Root directory**: `website`
    - **Build command**: `npm run build`
    - **Build output directory**: `dist`
-3. Security and caching headers are served from `website/public/_headers`, and fallback routing uses `website/public/_redirects`.
+3. Security and caching headers are served from `website/public/_headers`. Cloudflare Pages automatically falls back unmatched paths to `index.html` because no `404.html` is emitted.
 
 Or deploy directly with Wrangler CLI:
 
